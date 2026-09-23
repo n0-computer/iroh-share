@@ -1,0 +1,856 @@
+mod completion;
+mod links;
+mod model;
+mod network;
+
+use anyhow::{Context, Result};
+use blobtorrent_proto::{BlobTicket, Job, JobKind, JobState};
+use clap::Parser;
+use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use model::Model;
+use n0_future::StreamExt;
+use network::{Action, Update};
+use ratatui::{
+    layout::{Constraint, Layout},
+    style::{Color, Style, Stylize},
+    text::Line,
+    widgets::{Block, Clear, Paragraph, Row, Table, TableState, Wrap},
+    Frame,
+};
+use std::{io::IsTerminal, path::PathBuf, time::Duration};
+use tokio::sync::mpsc;
+
+#[derive(Parser)]
+#[command(about = "Terminal interface for the blobtorrent daemon")]
+struct Args {
+    /// Override the platform-specific blobtorrent-tui config directory.
+    #[arg(long)]
+    config_dir: Option<PathBuf>,
+    /// Save the daemon endpoint ID to connect to, including on future starts.
+    #[arg(long)]
+    endpoint: Option<blobtorrent_proto::EndpointId>,
+    /// Print this client's persistent endpoint ID and exit (for authorization).
+    #[arg(long)]
+    print_id: bool,
+}
+
+#[derive(Default)]
+enum Input {
+    #[default]
+    Browse,
+    Share(String),
+    Ticket(String),
+    Target {
+        ticket: BlobTicket,
+        value: String,
+    },
+    Remove(u64),
+    NameLabel {
+        value: String,
+        job: Option<u64>,
+    },
+    NameTarget {
+        label: String,
+        value: String,
+        create: bool,
+    },
+    RemoveName(String),
+}
+
+#[derive(Default)]
+struct App {
+    model: Model,
+    names_view: bool,
+    client_id: Option<blobtorrent_proto::EndpointId>,
+    server_id: Option<blobtorrent_proto::EndpointId>,
+    link_action: Option<links::Action>,
+    input: Input,
+    completion: completion::Completion,
+    table: TableState,
+    status: String,
+    busy: bool,
+    details_scroll: u16,
+}
+
+impl App {
+    fn update(&mut self, update: Update) {
+        match update {
+            Update::Connecting => {
+                self.model.reset();
+                self.input = Input::Browse;
+                self.completion.reset();
+                self.busy = false;
+                self.status = "Connecting to daemon...".into();
+            }
+            Update::Disconnected(error) => {
+                self.model.reset();
+                self.input = Input::Browse;
+                self.completion.reset();
+                self.busy = false;
+                self.status = format!("Disconnected: {error}. Retrying...");
+            }
+            Update::Event(event) => {
+                let was_ready = self.model.ready;
+                self.model.apply(event);
+                if !was_ready && self.model.ready {
+                    self.status = "Connected".into();
+                }
+            }
+            Update::ActionResult(message) => {
+                self.busy = false;
+                self.status = message;
+            }
+        }
+    }
+
+    fn submit(&mut self, action: Action, tx: &mpsc::Sender<Action>) {
+        if !self.model.ready || self.busy {
+            return;
+        }
+        match tx.try_send(action) {
+            Ok(()) => {
+                self.busy = true;
+                self.status = "Request in progress...".into();
+            }
+            Err(error) => self.status = format!("Cannot submit request: {error}"),
+        }
+    }
+
+    fn key(&mut self, key: KeyEvent, tx: &mpsc::Sender<Action>) -> bool {
+        if key.kind == KeyEventKind::Release {
+            return false;
+        }
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return true;
+        }
+        if matches!(self.input, Input::Browse)
+            && key.modifiers.is_empty()
+            && matches!(key.code, KeyCode::Char('c' | 'o'))
+        {
+            if let Some(url) = links::selected_url(&self.model, self.names_view) {
+                self.link_action = Some(if key.code == KeyCode::Char('c') {
+                    links::Action::Copy(url)
+                } else {
+                    links::Action::Open(url)
+                });
+            } else {
+                self.status = "No URL available for this selection".into();
+            }
+            return false;
+        }
+        if key.code == KeyCode::Tab && matches!(self.input, Input::Browse) {
+            self.names_view = !self.names_view;
+            self.details_scroll = 0;
+            return false;
+        }
+        if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+            if let Input::Share(value) | Input::Target { value, .. } = &mut self.input {
+                if let Err(error) = self
+                    .completion
+                    .complete(value, key.code == KeyCode::BackTab)
+                {
+                    self.status = format!("Cannot complete path: {error}");
+                }
+            }
+            return false;
+        }
+        self.completion.reset();
+        if key.code == KeyCode::Esc {
+            self.input = Input::Browse;
+            return false;
+        }
+        match &mut self.input {
+            Input::Browse => match key.code {
+                KeyCode::Char('q') => return true,
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if self.names_view {
+                        self.model.step_name(true);
+                    } else {
+                        self.model.step(true);
+                    }
+                    self.details_scroll = 0;
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if self.names_view {
+                        self.model.step_name(false);
+                    } else {
+                        self.model.step(false);
+                    }
+                    self.details_scroll = 0;
+                }
+                KeyCode::PageDown => self.details_scroll = self.details_scroll.saturating_add(3),
+                KeyCode::PageUp => self.details_scroll = self.details_scroll.saturating_sub(3),
+                KeyCode::Char('s') if self.model.ready && !self.busy => {
+                    self.input = Input::Share(String::new())
+                }
+                KeyCode::Char('d') if self.model.ready && !self.busy => {
+                    self.input = Input::Ticket(String::new())
+                }
+                KeyCode::Char('n') if self.model.ready && !self.busy => {
+                    self.input = Input::NameLabel {
+                        value: String::new(),
+                        job: if self.names_view {
+                            None
+                        } else {
+                            self.model.selected
+                        },
+                    };
+                }
+                KeyCode::Char('e') if self.names_view && self.model.ready && !self.busy => {
+                    if let Some(label) = self.model.selected_name.clone() {
+                        let value = self
+                            .model
+                            .names
+                            .get(&label)
+                            .map(|name| match &name.target {
+                                blobtorrent_proto::NameTarget::Url(url) => url.to_string(),
+                                blobtorrent_proto::NameTarget::Job(id) => format!("data:{id}"),
+                            })
+                            .unwrap_or_default();
+                        self.input = Input::NameTarget {
+                            label,
+                            value,
+                            create: false,
+                        };
+                    }
+                }
+                KeyCode::Char('x') if self.names_view && self.model.ready && !self.busy => {
+                    if let Some(label) = self.model.selected_name.clone() {
+                        self.input = Input::RemoveName(label);
+                    }
+                }
+                KeyCode::Char('x') if self.model.ready && !self.busy => {
+                    if let Some(id) = self.model.selected {
+                        self.input = Input::Remove(id);
+                    }
+                }
+                _ => {}
+            },
+            Input::RemoveName(label) => match key.code {
+                KeyCode::Char('y') => {
+                    let label = label.clone();
+                    self.input = Input::Browse;
+                    self.submit(Action::RemoveName(label), tx);
+                }
+                KeyCode::Char('n') => self.input = Input::Browse,
+                _ => {}
+            },
+            Input::Remove(id) => match key.code {
+                KeyCode::Char('y') => {
+                    let id = *id;
+                    self.input = Input::Browse;
+                    self.completion.reset();
+                    self.submit(Action::Remove(id), tx);
+                }
+                KeyCode::Char('n') => self.input = Input::Browse,
+                _ => {}
+            },
+            Input::Share(value)
+            | Input::Ticket(value)
+            | Input::Target { value, .. }
+            | Input::NameLabel { value, .. }
+            | Input::NameTarget { value, .. } => match key.code {
+                KeyCode::Char(c)
+                    if !key
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                {
+                    value.push(c)
+                }
+                KeyCode::Backspace => {
+                    value.pop();
+                }
+                KeyCode::Enter => self.accept_input(tx),
+                _ => {}
+            },
+        }
+        false
+    }
+
+    fn paste(&mut self, text: String) {
+        self.completion.reset();
+        match &mut self.input {
+            Input::Share(value)
+            | Input::Ticket(value)
+            | Input::Target { value, .. }
+            | Input::NameLabel { value, .. }
+            | Input::NameTarget { value, .. } => {
+                value.extend(text.chars().filter(|c| !c.is_control()))
+            }
+            _ => {}
+        }
+    }
+
+    fn input_path(&self, value: &str) -> Result<PathBuf> {
+        // Resolve relative paths here: the daemon may have a different working directory.
+        Ok(std::path::absolute(completion::expand_path(value)?)?)
+    }
+
+    fn accept_input(&mut self, tx: &mpsc::Sender<Action>) {
+        match std::mem::take(&mut self.input) {
+            Input::Share(value) if !value.is_empty() => match self.input_path(&value) {
+                Ok(path) => self.submit(Action::Share(path), tx),
+                Err(error) => {
+                    self.status = error.to_string();
+                    self.input = Input::Share(value);
+                }
+            },
+            Input::Ticket(value) => match value.trim().parse() {
+                Ok(ticket) => {
+                    self.input = Input::Target {
+                        ticket,
+                        value: String::new(),
+                    }
+                }
+                Err(error) => {
+                    self.status = format!("Invalid ticket: {error}");
+                    self.input = Input::Ticket(value);
+                }
+            },
+            Input::Target { ticket, value } if !value.is_empty() => match self.input_path(&value) {
+                Ok(target) => self.submit(Action::Download { ticket, target }, tx),
+                Err(error) => {
+                    self.status = error.to_string();
+                    self.input = Input::Target { ticket, value };
+                }
+            },
+            Input::NameLabel { value, job } if !value.is_empty() => {
+                if let Some(id) = job {
+                    self.submit(
+                        Action::CreateName {
+                            label: value,
+                            target: blobtorrent_proto::NameTarget::Job(id),
+                        },
+                        tx,
+                    );
+                    self.names_view = true;
+                } else {
+                    self.input = Input::NameTarget {
+                        label: value,
+                        value: String::new(),
+                        create: true,
+                    };
+                }
+            }
+            Input::NameTarget {
+                label,
+                value,
+                create,
+            } => {
+                let target = if let Some(id) = value
+                    .strip_prefix("data:")
+                    .or_else(|| value.strip_prefix("job:"))
+                {
+                    id.parse()
+                        .map(blobtorrent_proto::NameTarget::Job)
+                        .map_err(|e| format!("Invalid data ID: {e}"))
+                } else {
+                    value
+                        .parse()
+                        .map(blobtorrent_proto::NameTarget::Url)
+                        .map_err(|e| format!("Invalid URL: {e}"))
+                };
+                match target {
+                    Ok(target) => self.submit(
+                        if create {
+                            Action::CreateName { label, target }
+                        } else {
+                            Action::UpdateName { label, target }
+                        },
+                        tx,
+                    ),
+                    Err(error) => {
+                        self.status = error;
+                        self.input = Input::NameTarget {
+                            label,
+                            value,
+                            create,
+                        };
+                    }
+                }
+            }
+            input => self.input = input,
+        }
+    }
+
+    fn draw(&mut self, frame: &mut Frame) {
+        let [heading, jobs, details, footer] = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Min(5),
+            Constraint::Length(8),
+            Constraint::Length(3),
+        ])
+        .areas(frame.area());
+        let connection = if self.model.ready {
+            "connected"
+        } else {
+            "connecting"
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                "blobtorrent ".bold().cyan(),
+                format!("  {connection} · {} items", self.model.jobs.len()).into(),
+            ])),
+            heading,
+        );
+        if !self.names_view {
+            let rows = self.model.jobs.values().map(|job| {
+                let (state, progress) = summary(&job.state);
+                Row::new(vec![state.into(), progress, description(job)])
+            });
+            self.table.select(
+                self.model
+                    .jobs
+                    .keys()
+                    .position(|id| Some(*id) == self.model.selected),
+            );
+            let table = Table::new(
+                rows,
+                [
+                    Constraint::Length(13),
+                    Constraint::Length(28),
+                    Constraint::Min(10),
+                ],
+            )
+            .header(Row::new(["State", "Progress", "Path"]).bold())
+            .block(Block::bordered().title(" Data "))
+            .row_highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
+            .highlight_symbol("› ");
+            frame.render_stateful_widget(table, jobs, &mut self.table);
+        } else {
+            let rows = self.model.names.values().map(|name| {
+                Row::new(vec![
+                    name.label.clone(),
+                    name_status(&name.state).into(),
+                    match &name.target {
+                        blobtorrent_proto::NameTarget::Url(url) => url.to_string(),
+                        blobtorrent_proto::NameTarget::Job(id) => self
+                            .model
+                            .jobs
+                            .get(id)
+                            .map(description)
+                            .unwrap_or_else(|| format!("Data {id} unavailable")),
+                    },
+                ])
+            });
+            self.table.select(
+                self.model
+                    .names
+                    .keys()
+                    .position(|label| Some(label) == self.model.selected_name.as_ref()),
+            );
+            let table = Table::new(
+                rows,
+                [
+                    Constraint::Length(20),
+                    Constraint::Length(15),
+                    Constraint::Min(10),
+                ],
+            )
+            .header(Row::new(["Name", "Publication", "Target"]).bold())
+            .block(Block::bordered().title(" Names · Tab for data "))
+            .row_highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
+            .highlight_symbol("› ");
+            frame.render_stateful_widget(table, jobs, &mut self.table);
+        }
+        let enrollment_id = self.client_id.filter(|_| !self.model.ready);
+        let detail = if let Some(client_id) = enrollment_id {
+            format!("Client endpoint: {}\nDaemon endpoint: {}\n\nAuthorize this client on the daemon machine:\nblobtorrent control allow {}\nThe TUI retries automatically.", client_id, self.server_id.map(|id| id.to_string()).unwrap_or_else(|| "not configured; use --endpoint <daemon-id>".into()), client_id)
+        } else if self.names_view {
+            self.model
+                .selected_name
+                .as_ref()
+                .and_then(|label| self.model.names.get(label))
+                .map(|name| {
+                    let status = match &name.state {
+                        blobtorrent_proto::NameState::Published { url, .. }
+                        | blobtorrent_proto::NameState::Publishing { url } => url.to_string(),
+                        blobtorrent_proto::NameState::Failed { error } => error.message.clone(),
+                        _ => String::new(),
+                    };
+                    format!(
+                        "{}\n{} · {}\n{}",
+                        name.key.url(),
+                        clean(&name.label),
+                        name_status(&name.state),
+                        clean(&status)
+                    )
+                })
+                .unwrap_or_else(|| {
+                    "Press n to create a name, or select data and press n to name it.".into()
+                })
+        } else {
+            self.model
+                .selected
+                .and_then(|id| self.model.jobs.get(&id))
+                .map(job_details)
+                .unwrap_or_else(|| "No data selected. Press s to share or d to download.".into())
+        };
+        frame.render_widget(
+            Paragraph::new(detail)
+                .wrap(Wrap { trim: false })
+                .scroll((self.details_scroll, 0))
+                .block(Block::bordered().title(" Details · PgUp/PgDn to scroll ")),
+            details,
+        );
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(if self.names_view {
+                    "Tab data · ↑/↓ select · n create · e retarget · x remove · c copy · o open · q quit"
+                } else {
+                    "Tab names · ↑/↓ select · s share · d download · n name · x remove · c copy · o open · q quit"
+                })
+                .cyan(),
+                Line::from(clean(&self.status)),
+            ])
+            .wrap(Wrap { trim: false }),
+            footer,
+        );
+        let prompt = match &self.input {
+            Input::Browse => None,
+            Input::NameLabel { value, job } => Some((
+                if job.is_some() {
+                    "Name for selected data"
+                } else {
+                    "New name label"
+                },
+                value.clone(),
+            )),
+            Input::NameTarget { value, .. } => Some(("Target URL or data:<id>", value.clone())),
+            Input::RemoveName(label) => Some((
+                "Remove name",
+                format!("Remove {label} and its key? Published records expire later. [y/n]"),
+            )),
+            Input::Share(value) => Some(("Share path", value.clone())),
+            Input::Ticket(value) => Some(("Download ticket", value.clone())),
+            Input::Target { value, .. } => Some(("Download target directory", value.clone())),
+            Input::Remove(id) => Some((
+                "Remove data",
+                format!("Remove data {id}? Files are kept. [y/n]"),
+            )),
+        };
+        if let Some((title, value)) = prompt {
+            let [_, middle, _] = Layout::vertical([
+                Constraint::Fill(1),
+                Constraint::Length(9),
+                Constraint::Fill(1),
+            ])
+            .areas(frame.area());
+            let [_, area, _] = Layout::horizontal([
+                Constraint::Percentage(10),
+                Constraint::Percentage(80),
+                Constraint::Percentage(10),
+            ])
+            .areas(middle);
+            frame.render_widget(Clear, area);
+            frame.render_widget(
+                Paragraph::new(format!(
+                    "{}▏\n\n{}\nEnter to submit · Esc to cancel",
+                    clean(&value),
+                    if matches!(self.input, Input::Share(_) | Input::Target { .. }) {
+                        clean(&self.completion.hint())
+                    } else {
+                        String::new()
+                    }
+                ))
+                .wrap(Wrap { trim: false })
+                .block(
+                    Block::bordered()
+                        .title(title)
+                        .border_style(Style::default().fg(Color::Cyan)),
+                ),
+                area,
+            );
+        }
+    }
+}
+
+fn name_status(state: &blobtorrent_proto::NameState) -> &'static str {
+    use blobtorrent_proto::NameState::*;
+    match state {
+        Disabled => "Disabled",
+        WaitingForJob => "Waiting for data",
+        Publishing { .. } => "Publishing",
+        Published { .. } => "Published",
+        Failed { .. } => "Failed",
+    }
+}
+
+fn clean(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
+}
+
+fn description(job: &Job) -> String {
+    clean(&match &job.kind {
+        JobKind::Share { path } => path.display().to_string(),
+        JobKind::Download { target, .. } => target.display().to_string(),
+    })
+}
+
+fn counts(done: u64, total: u64, files: u64, all_files: u64) -> String {
+    format!("{done}/{total} B · {files}/{all_files} files")
+}
+
+fn summary(state: &JobState) -> (&'static str, String) {
+    match state {
+        JobState::Queued => ("Queued", String::new()),
+        JobState::Importing { progress: p } => (
+            "Importing",
+            counts(p.bytes_done, p.bytes_total, p.files_done, p.files_total),
+        ),
+        JobState::Downloading { progress: p, .. } => (
+            "Downloading",
+            match p.bytes_total {
+                Some(total) => format!("{}/{total} B", p.bytes_done),
+                None => format!("{} B", p.bytes_done),
+            },
+        ),
+        JobState::Exporting { progress: p, .. } => (
+            "Exporting",
+            counts(p.bytes_done, p.bytes_total, p.files_done, p.files_total),
+        ),
+        JobState::Seeding { .. } => ("Seeding", String::new()),
+        JobState::Failed { error } => ("Failed", clean(&error.message)),
+    }
+}
+
+fn job_details(job: &Job) -> String {
+    let (state, progress) = summary(&job.state);
+    let extra = match &job.state {
+        JobState::Seeding { ticket } => {
+            return format!(
+                "https://{}.blake3.link/\n{}\nSeeding\nHash: {}\nTicket: {ticket}",
+                z32::encode(ticket.hash().as_bytes()),
+                description(job),
+                ticket.hash(),
+            );
+        }
+        JobState::Downloading { source, .. } => {
+            format!("Hash: {}\nSource ticket: {source}", source.hash())
+        }
+        JobState::Exporting { root_hash, .. } => format!("Hash: {root_hash}"),
+        JobState::Failed { error } => format!("Error: {}", clean(&error.message)),
+        _ => String::new(),
+    };
+    format!("{}\n{state} {progress}\n{extra}", description(job))
+}
+
+fn default_config_dir() -> Result<PathBuf> {
+    dirs::config_dir()
+        .map(|base| base.join("blobtorrent-tui"))
+        .context("cannot determine the user config directory; provide --config-dir")
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
+    let config_dir = match args.config_dir {
+        Some(path) => path,
+        None => default_config_dir()?,
+    };
+    if let Some(endpoint) = args.endpoint {
+        blobtorrent_proto::client::configure_endpoint(&config_dir, Some(endpoint))?;
+    }
+    let key =
+        blobtorrent_proto::client::load_or_create_key(&config_dir.join("control-client.key"))?;
+    if args.print_id {
+        println!("{}", key.public());
+        return Ok(());
+    }
+    anyhow::ensure!(
+        std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
+        "blobtorrent-tui requires an interactive terminal"
+    );
+    let mut terminal = ratatui::try_init()?;
+    let result = run(&mut terminal, config_dir).await;
+    ratatui::restore();
+    result
+}
+
+async fn run(terminal: &mut ratatui::DefaultTerminal, config_dir: PathBuf) -> Result<()> {
+    let (actions_tx, actions_rx) = mpsc::channel(8);
+    let (updates_tx, mut updates_rx) = mpsc::channel(256);
+    let worker = tokio::spawn(network::run(config_dir.clone(), actions_rx, updates_tx));
+    let mut events = EventStream::new();
+    let server_id = blobtorrent_proto::client::configured_endpoint(&config_dir)?;
+    let mut app = App {
+        client_id: Some(
+            blobtorrent_proto::client::load_or_create_key(&config_dir.join("control-client.key"))?
+                .public(),
+        ),
+        server_id,
+        ..Default::default()
+    };
+    let (link_tx, mut link_results) = links::worker();
+    let mut tick = tokio::time::interval(Duration::from_millis(100));
+    let result = async {
+        loop {
+            tokio::select! {
+                _ = tick.tick() => { terminal.draw(|frame| app.draw(frame))?;
+                    if terminal.size()?.height > 1 { links::draw_link(links::selected_url(&app.model, app.names_view).as_ref(), terminal.size()?.width)?; } }
+                Some(outcome) = link_results.recv() => { app.status = links::complete(outcome); }
+                update = updates_rx.recv() => { app.update(update.context("connection worker stopped")?); }
+                event = events.next() => match event.context("terminal input closed")?? {
+                    Event::Key(key) => if app.key(key, &actions_tx) { return Ok(()); },
+                    Event::Paste(text) => app.paste(text),
+                    Event::Resize(_, _) => { terminal.draw(|frame| app.draw(frame))?;
+                    if terminal.size()?.height > 1 { links::draw_link(links::selected_url(&app.model, app.names_view).as_ref(), terminal.size()?.width)?; } }
+                    _ => {}
+                }
+            }
+            if let Some(action) = app.link_action.take() {
+                if link_tx.try_send(action).is_err() {
+                    app.status = "URL action queue is busy".into();
+                }
+            }
+        }
+    }.await;
+    worker.abort();
+    let _ = worker.await;
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blobtorrent_proto::{JobError, WatchEvent};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn disconnected_view_shows_enrollment_and_completes_local_paths() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let client_id =
+            blobtorrent_proto::client::load_or_create_key(&root.path().join("key"))?.public();
+        let mut app = App {
+            client_id: Some(client_id),
+            server_id: Some(client_id),
+            ..Default::default()
+        };
+        let mut terminal = Terminal::new(TestBackend::new(110, 30))?;
+        terminal.draw(|frame| app.draw(frame))?;
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("blobtorrent control allow"));
+        assert!(text.contains(&client_id.to_string()));
+        assert_eq!(
+            app.input_path("~/local-path")?,
+            dirs::home_dir().unwrap().join("local-path")
+        );
+        assert_eq!(
+            app.input_path("relative-path")?,
+            std::env::current_dir()?.join("relative-path")
+        );
+        assert_eq!(app.input_path("/srv/data")?, PathBuf::from("/srv/data"));
+        let (tx, _) = mpsc::channel(8);
+        std::fs::write(root.path().join("complete-me"), b"test")?;
+        app.input = Input::Share(root.path().join("complete-").display().to_string());
+        app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), &tx);
+        assert!(
+            matches!(&app.input, Input::Share(value) if value == &root.path().join("complete-me").display().to_string())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn url_keys_use_selection_and_do_not_intercept_prompts() {
+        use blobtorrent_proto::{Name, NameKey, NameState, NameTarget};
+        let (tx, mut rx) = mpsc::channel(8);
+        let mut app = App {
+            names_view: true,
+            ..Default::default()
+        };
+        let url = NameKey([4; 32]).url();
+        app.update(Update::Event(WatchEvent::NameUpdated(Box::new(Name {
+            label: "site".into(),
+            key: NameKey([4; 32]),
+            target: NameTarget::Url("https://example.com/".parse().unwrap()),
+            state: NameState::Disabled,
+        }))));
+        app.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE), &tx);
+        assert!(matches!(app.link_action.take(), Some(links::Action::Copy(value)) if value == url));
+        app.key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE), &tx);
+        assert!(matches!(app.link_action.take(), Some(links::Action::Open(value)) if value == url));
+        assert!(rx.try_recv().is_err());
+        app.input = Input::Share(String::new());
+        app.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE), &tx);
+        assert!(matches!(&app.input, Input::Share(value) if value == "c"));
+        assert!(app.link_action.is_none());
+        assert!(app.key(
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            &tx
+        ));
+    }
+
+    #[test]
+    fn renders_failure_and_clears_state_on_disconnect() -> Result<()> {
+        let mut app = App::default();
+        app.update(Update::Event(WatchEvent::JobUpdated(Box::new(Job {
+            id: 9,
+            kind: JobKind::Share {
+                path: "file.txt".into(),
+            },
+            state: JobState::Failed {
+                error: JobError {
+                    message: "file disappeared".into(),
+                },
+            },
+        }))));
+        app.update(Update::Event(WatchEvent::SnapshotComplete));
+        let mut terminal = Terminal::new(TestBackend::new(100, 25))?;
+        terminal.draw(|frame| app.draw(frame))?;
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("Failed"));
+        assert!(text.contains("file disappeared"));
+        app.input = Input::Remove(9);
+        app.update(Update::Disconnected("connection lost".into()));
+        assert!(!app.model.ready);
+        assert!(app.model.jobs.is_empty());
+        assert!(matches!(app.input, Input::Browse));
+        Ok(())
+    }
+
+    #[test]
+    fn tab_completes_share_path_without_submitting() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("my file.txt");
+        std::fs::write(&path, "hello")?;
+        let (tx, mut rx) = mpsc::channel(8);
+        let mut app = App::default();
+        app.model.ready = true;
+        app.input = Input::Share(dir.path().join("my").display().to_string());
+        app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), &tx);
+        assert!(matches!(&app.input, Input::Share(value) if value == &path.display().to_string()));
+        assert!(rx.try_recv().is_err());
+        app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &tx);
+        assert!(matches!(rx.try_recv(), Ok(Action::Share(value)) if value == path));
+        Ok(())
+    }
+
+    #[test]
+    fn removal_requires_confirmation_and_offline_actions_are_disabled() {
+        let (tx, mut rx) = mpsc::channel(8);
+        let mut app = App::default();
+        app.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE), &tx);
+        assert!(matches!(app.input, Input::Browse));
+        app.model.ready = true;
+        app.model.selected = Some(5);
+        app.key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE), &tx);
+        assert!(rx.try_recv().is_err());
+        app.key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE), &tx);
+        assert!(matches!(rx.try_recv(), Ok(Action::Remove(5))));
+        assert!(app.busy);
+    }
+}
