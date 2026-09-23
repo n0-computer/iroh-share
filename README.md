@@ -317,10 +317,10 @@ Frontend capabilities and protocol behavior are described in
 
 GitHub Actions runs formatting, Clippy, and workspace tests on pull requests and
 pushes to `main`. The **Binary releases** workflow builds the daemon, TUI, and GUI
-for Windows x64, macOS Apple Silicon, and macOS Intel. It can be run manually to
+for Windows x64 and macOS Apple Silicon. It can be run manually to
 produce downloadable workflow artifacts without creating a release.
 
 Pushing a `v*` tag publishes the archives and SHA-256 checksums as a GitHub Release
-once all three builds succeed. Windows uses ZIP; macOS uses tar.gz and also
+once both builds succeed. Windows uses ZIP; macOS uses tar.gz and also
 includes a `Blobtorrent.app` bundle. These builds are unsigned and not notarized;
 OS download protections may require explicit approval to run them.
