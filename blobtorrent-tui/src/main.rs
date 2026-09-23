@@ -23,6 +23,9 @@ use tokio::sync::mpsc;
 #[derive(Parser)]
 #[command(about = "Terminal interface for the blobtorrent daemon")]
 struct Args {
+    /// Pair with the daemon using its printed one-client ticket, then open the TUI.
+    #[arg(value_name = "PAIRING_TICKET", conflicts_with = "endpoint")]
+    ticket: Option<blobtorrent_proto::PairingTicket>,
     /// Override the platform-specific blobtorrent-tui config directory.
     #[arg(long)]
     config_dir: Option<PathBuf>,
@@ -461,7 +464,7 @@ impl App {
         }
         let enrollment_id = self.client_id.filter(|_| !self.model.ready);
         let detail = if let Some(client_id) = enrollment_id {
-            format!("Client endpoint: {}\nDaemon endpoint: {}\n\nAuthorize this client on the daemon machine:\nblobtorrent control allow {}\nThe TUI retries automatically.", client_id, self.server_id.map(|id| id.to_string()).unwrap_or_else(|| "not configured; use --endpoint <daemon-id>".into()), client_id)
+            format!("Client endpoint: {}\nDaemon endpoint: {}\n\nGet a ticket on the daemon machine: blobtorrent control pair\nThen run: blobtorrent-tui <pairing-ticket>\nThe TUI retries automatically.", client_id, self.server_id.map(|id| id.to_string()).unwrap_or_else(|| "not configured".into()))
         } else if self.names_view {
             self.model
                 .selected_name
@@ -656,6 +659,15 @@ async fn main() -> Result<()> {
         Some(path) => path,
         None => default_config_dir()?,
     };
+    if !args.print_id {
+        anyhow::ensure!(
+            std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
+            "blobtorrent-tui requires an interactive terminal"
+        );
+    }
+    if let Some(ticket) = args.ticket {
+        blobtorrent_proto::client::pair(&config_dir, &ticket).await?;
+    }
     if let Some(endpoint) = args.endpoint {
         blobtorrent_proto::client::configure_endpoint(&config_dir, Some(endpoint))?;
     }
@@ -665,10 +677,32 @@ async fn main() -> Result<()> {
         println!("{}", key.public());
         return Ok(());
     }
-    anyhow::ensure!(
-        std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
-        "blobtorrent-tui requires an interactive terminal"
-    );
+    if blobtorrent_proto::client::configured_endpoint(&config_dir)?.is_none() {
+        use std::io::Write;
+        eprintln!(
+            "Paste the ticket printed by the daemon, or create one with blobtorrent control pair."
+        );
+        loop {
+            eprint!("Pairing ticket: ");
+            std::io::stderr().flush()?;
+            let mut input = String::new();
+            anyhow::ensure!(
+                std::io::stdin().read_line(&mut input)? > 0,
+                "pairing input closed"
+            );
+            let ticket = match input.trim().parse::<blobtorrent_proto::PairingTicket>() {
+                Ok(ticket) => ticket,
+                Err(_) => {
+                    eprintln!("Invalid ticket. Paste the complete blobtorrent ticket.");
+                    continue;
+                }
+            };
+            match blobtorrent_proto::client::pair(&config_dir, &ticket).await {
+                Ok(()) => break,
+                Err(error) => eprintln!("Pairing failed: {error:#}"),
+            }
+        }
+    }
     let mut terminal = ratatui::try_init()?;
     let result = run(&mut terminal, config_dir).await;
     ratatui::restore();
@@ -743,7 +777,7 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect();
-        assert!(text.contains("blobtorrent control allow"));
+        assert!(text.contains("blobtorrent control pair"));
         assert!(text.contains(&client_id.to_string()));
         Ok(())
     }

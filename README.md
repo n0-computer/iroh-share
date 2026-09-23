@@ -25,7 +25,7 @@ Start the daemon, then open the TUI in another terminal:
 
 ```sh
 cargo run -- daemon
-# Pair the TUI once using the steps under Control identities below.
+# Paste the ticket printed by the daemon when prompted.
 cargo run -p blobtorrent-tui
 ```
 
@@ -216,22 +216,39 @@ directory. Its default directory is selected using `dirs::config_dir()`:
 - Windows: `%APPDATA%\blobtorrent-tui`.
 
 Use `--config-dir` to override it. It contains `control-client.key` and `client.json`
-(the saved daemon endpoint ID). Keys are created atomically with mode 0600 on Unix.
-Pair the TUI once, even on the same machine:
+(the saved daemon identity and address hints). Keys are created atomically with mode
+0600 on Unix. The pairing secret is not saved by the TUI.
 
-1. On the daemon machine, start `blobtorrent daemon`, then run
-   `blobtorrent control endpoint` to print its stable endpoint ID.
-2. On the TUI machine, run
-   `blobtorrent-tui --endpoint <daemon-id> --print-id`.
-   This saves the daemon choice and prints the TUI's stable client ID.
-3. On the daemon machine, run `blobtorrent control allow <tui-id>`.
-4. Run `blobtorrent-tui` on the TUI machine. It remembers the server on future
-   launches. If already open, it retries automatically after authorization.
+On its first startup, `blobtorrent daemon` prints a ready-to-run command:
 
-The disconnected TUI shows its identity and the authorization command. Change
-servers with `--endpoint <daemon-id>`; the choice persists. Without a saved endpoint,
-it displays instructions for setting one. Path completion and resolution use the
-daemon’s filesystem, so the TUI can run on another machine.
+```sh
+blobtorrent-tui '<pairing-ticket>'
+```
+
+The ticket contains the daemon identity, address hints, and a random one-time secret.
+It uses `iroh-tickets` with the `blobtorrent` prefix and a versioned postcard payload.
+You can also launch `blobtorrent-tui` without arguments and paste the ticket at its
+first-run prompt. The TUI creates its own persistent identity, redeems the ticket,
+saves the connection, and opens the interface without another setup step.
+Subsequent launches only need `blobtorrent-tui`.
+To create additional tickets while the daemon is running:
+
+```sh
+blobtorrent control pair
+```
+
+Multiple tickets can be outstanding at once. Each authorizes one authenticated
+client identity; retries by that same client are safe, and a ticket cannot restore
+revoked access. Tickets are valid until redeemed or the daemon stops. Paired client
+authorizations persist across daemon restarts. Anyone holding an unused ticket can
+claim its full control access.
+
+Pairing uses `/blobtorrent/pair/1` on the same iroh endpoint. It exposes only enrollment;
+normal control requests use the endpoint allowlist. Authorization is saved before
+success is reported. The disconnected TUI displays ticket setup instructions.
+Path completion and resolution use the daemon’s filesystem, so the TUI can run on
+another machine. `--endpoint <daemon-id>` selects an explicitly authorized daemon
+without redeeming a ticket; `--print-id` prints the TUI's identity.
 
 `blobtorrent control list` lists allowed IDs; `blobtorrent control revoke <id>`
 removes one and closes its active control connections, including Watch streams.

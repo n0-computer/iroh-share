@@ -59,6 +59,8 @@ enum CommandLine {
 
 #[derive(Subcommand)]
 enum ControlCommand {
+    /// Print a one-client pairing ticket for the TUI.
+    Pair,
     Id,
     Endpoint,
     List,
@@ -115,6 +117,7 @@ struct Actor {
     store: FsStore,
     endpoint: Endpoint,
     access: control::Access,
+    pairing: control::Pairing,
     watchers: Vec<irpc::channel::mpsc::Sender<RpcResult<WatchEvent>>>,
     updates_tx: mpsc::Sender<Job>,
     updates_rx: mpsc::Receiver<Job>,
@@ -151,6 +154,10 @@ impl Actor {
                 }
             };
             match message {
+                ControlMessage::CreatePairingTicket(message) => {
+                    let ticket = self.pairing.issue(control::pairing_address(&self.endpoint));
+                    let _ = message.tx.send(Ok(ticket)).await;
+                }
                 ControlMessage::CompletePath(message) => {
                     // Directory I/O must not hold up Watch events or other control requests.
                     tokio::spawn(async move {
@@ -431,6 +438,8 @@ async fn daemon(state_dir: &Path, no_announce: bool) -> Result<()> {
     let owner =
         blobtorrent_proto::client::load_or_create_key(&state_dir.join("control-client.key"))?;
     let access = control::Access::load(state_dir, owner.public())?;
+    let first_start = !state_dir.join("daemon.key").try_exists()?;
+    let pairing = control::Pairing::default();
     let server_key = blobtorrent_proto::client::load_or_create_key(&state_dir.join("daemon.key"))?;
     let blob_endpoint = Endpoint::builder(presets::N0)
         .secret_key(server_key)
@@ -440,6 +449,13 @@ async fn daemon(state_dir: &Path, no_announce: bool) -> Result<()> {
         .await?;
     let (tx, rx) = mpsc::channel(64);
     let router = Router::builder(blob_endpoint.clone())
+        .accept(
+            blobtorrent_proto::PAIRING_ALPN,
+            control::PairingProtocol {
+                access: access.clone(),
+                pairing: pairing.clone(),
+            },
+        )
         .accept(iroh_blobs::ALPN, BlobsProtocol::new(&store, None))
         .accept(
             blobtorrent_proto::CONTROL_ALPN,
@@ -498,6 +514,7 @@ async fn daemon(state_dir: &Path, no_announce: bool) -> Result<()> {
         store: store.clone(),
         endpoint: blob_endpoint,
         access,
+        pairing,
         watchers: Vec::new(),
         updates_tx,
         updates_rx,
@@ -509,8 +526,16 @@ async fn daemon(state_dir: &Path, no_announce: bool) -> Result<()> {
     actor.refresh_names().await;
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let server_id = actor.endpoint.id();
-    let mut actor_task = tokio::spawn(actor.run(shutdown_rx));
     println!("blobtorrent endpoint {server_id}");
+    if first_start {
+        // Gather relay hints without requiring Internet access for local setup.
+        let _ = tokio::time::timeout(Duration::from_secs(5), actor.endpoint.online()).await;
+        let ticket = actor
+            .pairing
+            .issue(control::pairing_address(&actor.endpoint));
+        println!("Connect the TUI with this one-client ticket:\nblobtorrent-tui '{ticket}'");
+    }
+    let mut actor_task = tokio::spawn(actor.run(shutdown_rx));
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {},
         result = &mut actor_task => { result?; },
@@ -561,6 +586,7 @@ async fn client(state_dir: &Path, command: CommandLine) -> Result<()> {
     match command {
         CommandLine::Control { command } => match command {
             ControlCommand::Id | ControlCommand::Endpoint => unreachable!(),
+            ControlCommand::Pair => println!("{}", client.create_pairing_ticket().await?),
             ControlCommand::Allow { endpoint } => client.allow_control(endpoint).await?,
             ControlCommand::Revoke { endpoint } => client.revoke_control(endpoint).await?,
             ControlCommand::List => {
@@ -680,6 +706,7 @@ mod tests {
             store: store.clone(),
             endpoint: endpoint.clone(),
             access,
+            pairing: control::Pairing::default(),
             watchers: Vec::new(),
             updates_tx,
             updates_rx,
@@ -696,6 +723,11 @@ mod tests {
                 .map_err(anyhow::Error::msg)?,
             WatchEvent::SnapshotComplete
         ));
+        let invitation = client
+            .rpc(blobtorrent_proto::CreatePairingTicket {})
+            .await?
+            .map_err(anyhow::Error::msg)?;
+        assert_eq!(invitation.addr.id, endpoint.id());
         let completions = client
             .rpc(blobtorrent_proto::CompletePath {
                 path: temp.path().join("hell"),

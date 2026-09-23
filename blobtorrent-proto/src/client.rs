@@ -39,23 +39,23 @@ impl ControlClient {
     /// Connect using only the client's own configuration and identity.
     /// Never falls back to daemon state files.
     pub async fn connect_configured(config_dir: &Path) -> Result<Self> {
-        let server = configured_endpoint(config_dir)?
-            .context("no daemon configured; start blobtorrent-tui with --endpoint <daemon-id>")?;
+        let server = configured_address(config_dir)?
+            .context("no daemon configured; start blobtorrent-tui <pairing-ticket>")?;
         let key = load_or_create_key(&config_dir.join("control-client.key"))?;
         Self::connect_to(server, key).await
     }
 
-    async fn connect_to(server: crate::EndpointId, key: SecretKey) -> Result<Self> {
+    async fn connect_to(server: EndpointAddr, key: SecretKey) -> Result<Self> {
         let endpoint = Endpoint::builder(presets::N0)
             .secret_key(key)
             .address_lookup(iroh::address_lookup::dns::DnsAddressLookup::n0_dns())
             .bind()
             .await?;
-        Ok(Self::from_endpoint(endpoint, server.into()))
+        Ok(Self::from_endpoint(endpoint, server))
     }
 
     pub async fn connect(state_dir: &Path) -> Result<Self> {
-        let server = configured_endpoint(state_dir)?;
+        let server = configured_address(state_dir)?;
         let key = load_or_create_key(&state_dir.join("control-client.key"))?;
         if let Some(server) = server {
             Self::connect_to(server, key).await
@@ -71,6 +71,16 @@ impl ControlClient {
             Ok(client)
         }
     }
+    pub async fn create_pairing_ticket(&self) -> Result<crate::PairingTicket> {
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            self.client.rpc(crate::CreatePairingTicket {}),
+        )
+        .await
+        .context("pairing ticket request timed out")??
+        .map_err(anyhow::Error::msg)
+    }
+
     pub async fn allow_control(&self, endpoint: crate::EndpointId) -> Result<()> {
         tokio::time::timeout(
             Duration::from_secs(10),
@@ -246,20 +256,34 @@ pub fn load_or_create_key(path: &Path) -> Result<SecretKey> {
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ClientConfig {
     endpoint: crate::EndpointId,
+    #[serde(default)]
+    addr: Option<EndpointAddr>,
 }
 pub fn configured_endpoint(root: &Path) -> Result<Option<crate::EndpointId>> {
+    Ok(configured_address(root)?.map(|addr| addr.id))
+}
+pub fn configured_address(root: &Path) -> Result<Option<EndpointAddr>> {
     match std::fs::read(root.join("client.json")) {
-        Ok(bytes) => Ok(Some(
-            serde_json::from_slice::<ClientConfig>(&bytes)?.endpoint,
-        )),
+        Ok(bytes) => {
+            let config: ClientConfig = serde_json::from_slice(&bytes)?;
+            let addr = config.addr.unwrap_or_else(|| config.endpoint.into());
+            anyhow::ensure!(
+                addr.id == config.endpoint,
+                "configured endpoint does not match address"
+            );
+            Ok(Some(addr))
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error.into()),
     }
 }
 pub fn configure_endpoint(root: &Path, endpoint: Option<crate::EndpointId>) -> Result<()> {
+    configure_address(root, endpoint.map(EndpointAddr::from))
+}
+pub fn configure_address(root: &Path, addr: Option<EndpointAddr>) -> Result<()> {
     std::fs::create_dir_all(root)?;
     let path = root.join("client.json");
-    if let Some(endpoint) = endpoint {
+    if let Some(addr) = addr {
         let temporary = root.join(format!("client.{}.tmp", rand::random::<u64>()));
         let result = (|| -> Result<()> {
             use std::io::Write;
@@ -267,7 +291,10 @@ pub fn configure_endpoint(root: &Path, endpoint: Option<crate::EndpointId>) -> R
                 .write(true)
                 .create_new(true)
                 .open(&temporary)?;
-            file.write_all(&serde_json::to_vec_pretty(&ClientConfig { endpoint })?)?;
+            file.write_all(&serde_json::to_vec_pretty(&ClientConfig {
+                endpoint: addr.id,
+                addr: Some(addr),
+            })?)?;
             file.sync_all()?;
             std::fs::rename(&temporary, path)?;
             Ok(())
@@ -285,6 +312,40 @@ pub fn configure_endpoint(root: &Path, endpoint: Option<crate::EndpointId>) -> R
     }
 }
 
+/// Redeem over an authenticated connection; the server sees this endpoint's identity.
+pub async fn redeem_pairing(endpoint: &Endpoint, ticket: &crate::PairingTicket) -> Result<()> {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        let connection = endpoint.connect(ticket.addr.clone(), crate::PAIRING_ALPN).await?;
+        let result = async {
+            let (mut send, mut recv) = connection.open_bi().await?;
+            send.write_all(ticket.secret.as_bytes()).await?;
+            send.finish()?;
+            let response = recv.read_to_end(1).await?;
+            match response.as_slice() {
+                [value] if *value == crate::PairingStatus::Accepted as u8 => Ok(()),
+                [value] if *value == crate::PairingStatus::StorageFailure as u8 => anyhow::bail!("daemon could not save authorization; retry the ticket"),
+                _ => anyhow::bail!("pairing ticket is invalid or already claimed; run blobtorrent control pair for a new ticket"),
+            }
+        }.await;
+        connection.close(0u32.into(), b"pairing complete");
+        result
+    }).await.context("pairing timed out; retry with the same ticket and config directory")?
+}
+
+/// Persist the client identity before enrollment and save only the daemon address.
+pub async fn pair(config_dir: &Path, ticket: &crate::PairingTicket) -> Result<()> {
+    let key = load_or_create_key(&config_dir.join("control-client.key"))?;
+    let endpoint = Endpoint::builder(presets::N0)
+        .secret_key(key)
+        .address_lookup(iroh::address_lookup::dns::DnsAddressLookup::n0_dns())
+        .bind()
+        .await?;
+    let result = redeem_pairing(&endpoint, ticket).await;
+    endpoint.close().await;
+    result?;
+    configure_address(config_dir, Some(ticket.addr.clone()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,7 +357,7 @@ mod tests {
             Ok(_) => anyhow::bail!("connected without a configured endpoint"),
             Err(error) => error,
         };
-        assert!(error.to_string().contains("--endpoint <daemon-id>"));
+        assert!(error.to_string().contains("<pairing-ticket>"));
         assert!(!root.path().join("control-client.key").exists());
         Ok(())
     }

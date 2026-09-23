@@ -26,6 +26,9 @@ pub struct RevokeControl {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListControl {}
 
+mod pairing;
+pub use pairing::*;
+
 mod names;
 pub use names::*;
 
@@ -192,4 +195,6 @@ pub enum ControlProtocol {
     Watch(Watch),
     #[rpc(tx=oneshot::Sender<RpcResult<PathCompletions>>)]
     CompletePath(CompletePath),
+    #[rpc(tx=oneshot::Sender<RpcResult<PairingTicket>>)]
+    CreatePairingTicket(CreatePairingTicket),
 }
