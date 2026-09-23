@@ -30,8 +30,8 @@ iroh-blobs = "0.103"
 n0-future = "0.3"
 walkdir = "2"
 blake3 = "1"
-iroh-mainline-endpoint-discovery = { git = "https://github.com/n0-computer/iroh-content-discovery.git", rev = "9c9973c1a481a37e468633a360df29e5f52c6bab" }
-n0-mainline = { version = "0.6", git = "https://github.com/n0-computer/n0-mainline.git", branch = "addr-index-datagrams" }
+iroh-mainline-endpoint-discovery = { git = "https://github.com/n0-computer/iroh-content-discovery.git", rev = "a6eef1b33a5094ecd8976a0635e07331508b4e7e" }
+n0-mainline = { version = "0.6", git = "https://github.com/n0-computer/n0-mainline.git", rev = "1c0128550a721326ea183e8ef05c776af569f56f" }
 
 tempfile = "3"
 crossterm = { version = "0.29", features = ["event-stream"] }

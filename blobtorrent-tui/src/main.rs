@@ -627,7 +627,7 @@ fn job_details(job: &Job) -> String {
     let extra = match &job.state {
         JobState::Seeding { ticket } => {
             return format!(
-                "https://{}.blake3.link/\n{}\nSeeding\nHash: {}\nTicket: {ticket}",
+                "https://{}.blake3.net/\n{}\nSeeding\nHash: {}\nTicket: {ticket}",
                 z32::encode(ticket.hash().as_bytes()),
                 description(job),
                 ticket.hash(),

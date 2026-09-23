@@ -377,7 +377,7 @@ fn desired(target: &NameTarget, jobs: &BTreeMap<u64, Job>) -> Option<Url> {
         NameTarget::Job(id) => match &jobs.get(id)?.state {
             JobState::Seeding { ticket } => Some(
                 format!(
-                    "https://{}.blake3.link/",
+                    "https://{}.blake3.net/",
                     z32::encode(ticket.hash().as_bytes())
                 )
                 .parse()

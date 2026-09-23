@@ -2064,7 +2064,7 @@ dependencies = [
 [[package]]
 name = "iroh-mainline-endpoint-discovery"
 version = "0.1.0"
-source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=9c9973c1a481a37e468633a360df29e5f52c6bab#9c9973c1a481a37e468633a360df29e5f52c6bab"
+source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=a6eef1b33a5094ecd8976a0635e07331508b4e7e#a6eef1b33a5094ecd8976a0635e07331508b4e7e"
 dependencies = [
  "async-stream",
  "blake3",
@@ -2562,7 +2562,7 @@ dependencies = [
 [[package]]
 name = "n0-mainline"
 version = "0.6.0"
-source = "git+https://github.com/n0-computer/n0-mainline.git?branch=addr-index-datagrams#eed1ab6ebd5be5a8beae3e3ddc1ffb4c075e3fbf"
+source = "git+https://github.com/n0-computer/n0-mainline.git?rev=1c0128550a721326ea183e8ef05c776af569f56f#1c0128550a721326ea183e8ef05c776af569f56f"
 dependencies = [
  "crc",
  "dyn-clone",
@@ -4626,7 +4626,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 [[package]]
 name = "udp-addr-index-proto"
 version = "0.1.0"
-source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=9c9973c1a481a37e468633a360df29e5f52c6bab#9c9973c1a481a37e468633a360df29e5f52c6bab"
+source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=a6eef1b33a5094ecd8976a0635e07331508b4e7e#a6eef1b33a5094ecd8976a0635e07331508b4e7e"
 dependencies = [
  "postcard",
  "serde",

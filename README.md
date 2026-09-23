@@ -30,7 +30,7 @@ cargo run -p blobtorrent-tui
 ```
 
 The TUI shows live states and progress. Seeding details start with the collection's
-`https://<z32-hash>.blake3.link/` URL, followed by the hash and ticket; failed jobs
+`https://<z32-hash>.blake3.net/` URL, followed by the hash and ticket; failed jobs
 show their error. Use Up/Down (or j/k) to select an item, s to share a path,
 d to enter a ticket and download target, x to remove the selected item (y confirms),
 PageUp/PageDown to scroll details, and q or Ctrl-C to quit. Escape cancels a prompt.
@@ -127,8 +127,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ## Pkarr names
 
-Names provide a stable `https://<public-key>.pkarr.link/` URL pointing to an HTTP(S)
-URL or an existing job's current `blake3.link` URL:
+Names provide a stable `https://<public-key>.pkarr.net/` URL pointing to an HTTP(S)
+URL or an existing job's current `blake3.net` URL:
 
 ```sh
 blobtorrent names create website --url 'https://example.com/path?query=value'
@@ -153,7 +153,7 @@ retrying failures after thirty seconds. The Names view and Watch expose publicat
 status separately from transfer state. `--no-announce` keeps names locally with
 publication disabled. Full URL targets use a URI record at `_https._tcp.<key>`;
 origin-only HTTPS targets also include an apex HTTPS record for compatibility.
-The local gateway understands both. Opening pkarr.link URLs uses the companion
+The local gateway understands both. Opening pkarr.net URLs uses the companion
 browser extension and local gateway.
 
 Keys, targets, signed records, and all data requests and recovery phases live in `STATE_DIR/names.json`
@@ -165,7 +165,7 @@ URLs are rejected. Credentials in URLs are not supported.
 ### Copying and opening URLs
 
 Press **c** to copy the selected URL or **o** to open it in your default browser.
-Data uses its `blake3.link` URL once seeding; Names uses the stable `pkarr.link`
+Data uses its `blake3.net` URL once seeding; Names uses the stable `pkarr.net`
 URL. The heading also provides an **Open selected URL** terminal hyperlink
 (usually Ctrl-click or Cmd-click, depending on the terminal).
 

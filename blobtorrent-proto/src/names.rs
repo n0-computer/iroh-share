@@ -26,7 +26,7 @@ impl FromStr for NameKey {
 }
 impl NameKey {
     pub fn url(self) -> Url {
-        format!("https://{self}.pkarr.link/")
+        format!("https://{self}.pkarr.net/")
             .parse()
             .expect("public key is a valid hostname")
     }

@@ -26,7 +26,7 @@ pub fn selected_url(model: &Model, names: bool) -> Option<Url> {
     }
     match &model.jobs.get(&model.selected?)?.state {
         JobState::Seeding { ticket } => format!(
-            "https://{}.blake3.link/",
+            "https://{}.blake3.net/",
             z32::encode(ticket.hash().as_bytes())
         )
         .parse()
