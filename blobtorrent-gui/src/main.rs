@@ -394,59 +394,88 @@ impl App {
             ui.weak("Drop a folder or file to share it. Paths refer to the daemon's filesystem.");
         }
         ui.separator();
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for job in self.jobs.values() {
-                ui.push_id(job.id, |ui| {
-                    ui.group(|ui| {
-                        if let JobState::Seeding { ticket } = &job.state {
-                            link(ui, content_url(ticket));
-                        }
-                        let path = job_path(job);
-                        if ui
-                            .selectable_label(
-                                self.selected == Some(job.id),
-                                path.display().to_string(),
-                            )
-                            .clicked()
-                        {
-                            self.selected = Some(job.id);
-                        }
-                        ui.label(job_status(&job.state));
-                        ui.horizontal(|ui| {
-                            if let JobState::Seeding { ticket } = &job.state {
-                                if ui.small_button("Copy ticket").clicked() {
-                                    ui.ctx().copy_text(ticket.to_string());
-                                }
-                                if self.local_paths && ui.small_button("Open folder").clicked() {
-                                    let path = path.clone();
-                                    let tx = self.local_tx.clone();
-                                    self.runtime.spawn_blocking(move || {
-                                        let folder = if path.is_dir() {
-                                            path.as_path()
-                                        } else {
-                                            path.parent().unwrap_or(&path)
-                                        };
-                                        let _ = tx.send(LocalUpdate::Opened(
-                                            open::that(folder).map_err(|e| e.to_string()),
-                                        ));
-                                    });
-                                }
-                            }
+        egui::ScrollArea::both()
+            .id_salt("data_table_scroll")
+            .show(ui, |ui| {
+                egui::Grid::new("data_table")
+                    .striped(true)
+                    .spacing([16.0, 8.0])
+                    .show(ui, |ui| {
+                        table_header(
+                            ui,
+                            &[
+                                ("Path", 300.0),
+                                ("State / progress", 240.0),
+                                ("Content URL", 300.0),
+                                ("Actions", 90.0),
+                            ],
+                        );
+                        for job in self.jobs.values() {
+                            let path = job_path(job);
+                            let text = path.display().to_string();
                             if ui
-                                .add_enabled(self.ready && !self.busy, egui::Button::new("Remove"))
+                                .add_sized(
+                                    [300.0, 24.0],
+                                    egui::Button::new(&text)
+                                        .selected(self.selected == Some(job.id))
+                                        .frame(false)
+                                        .truncate(),
+                                )
+                                .on_hover_text(&text)
                                 .clicked()
                             {
-                                self.removal = Some(Removal::Data(job.id));
+                                self.selected = Some(job.id);
                             }
-                        });
+                            table_text(ui, job_status(&job.state), 240.0);
+                            if let JobState::Seeding { ticket } = &job.state {
+                                link(ui, content_url(ticket));
+                            } else {
+                                table_text(ui, "—".into(), 300.0);
+                            }
+                            ui.push_id(job.id, |ui| {
+                                ui.menu_button("Actions", |ui| {
+                                    if let JobState::Seeding { ticket } = &job.state {
+                                        if ui.button("Copy ticket").clicked() {
+                                            ui.ctx().copy_text(ticket.to_string());
+                                            ui.close();
+                                        }
+                                        if self.local_paths && ui.button("Open folder").clicked() {
+                                            let path = path.clone();
+                                            let tx = self.local_tx.clone();
+                                            self.runtime.spawn_blocking(move || {
+                                                let folder = if path.is_dir() {
+                                                    path.as_path()
+                                                } else {
+                                                    path.parent().unwrap_or(&path)
+                                                };
+                                                let _ = tx.send(LocalUpdate::Opened(
+                                                    open::that(folder).map_err(|e| e.to_string()),
+                                                ));
+                                            });
+                                            ui.close();
+                                        }
+                                    }
+                                    if ui
+                                        .add_enabled(
+                                            self.ready && !self.busy,
+                                            egui::Button::new("Remove…"),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.removal = Some(Removal::Data(job.id));
+                                        ui.close();
+                                    }
+                                });
+                            });
+                            ui.end_row();
+                        }
                     });
-                });
-            }
-            if self.jobs.is_empty() {
-                ui.weak("Share a path or download a blob to get started.");
-            }
-        });
+                if self.jobs.is_empty() {
+                    ui.weak("Share a path or download a blob to get started.");
+                }
+            });
     }
+
     fn names(&mut self, ui: &mut egui::Ui) {
         ui.heading("Names");
         ui.add_enabled_ui(self.ready && !self.busy, |ui| {
@@ -522,53 +551,85 @@ impl App {
             });
         });
         ui.separator();
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for name in self.names.values() {
-                ui.push_id(&name.label, |ui| {
-                    ui.group(|ui| {
-                        ui.strong(&name.label);
-                        link(ui, name.key.url().to_string());
-                        ui.label(match &name.target {
-                            NameTarget::Url(url) => url.to_string(),
-                            NameTarget::Job(id) => self
-                                .jobs
-                                .get(id)
-                                .map(|j| format!("Following {}", job_path(j).display()))
-                                .unwrap_or_else(|| "Linked data is unavailable".into()),
-                        });
-                        ui.label(match &name.state {
-                            NameState::Disabled => "Disabled".into(),
-                            NameState::WaitingForJob => "Waiting for data".into(),
-                            NameState::Publishing { .. } => "Publishing…".into(),
-                            NameState::Published { .. } => "Published".into(),
-                            NameState::Failed { error } => format!("Failed: {}", error.message),
-                        });
-                        ui.add_enabled_ui(self.ready && !self.busy, |ui| {
-                            ui.horizontal(|ui| {
-                                if ui.button("Edit").clicked() {
-                                    self.editing_name = true;
-                                    self.name_label = name.label.clone();
-                                    match &name.target {
-                                        NameTarget::Url(url) => {
-                                            self.name_job = false;
-                                            self.name_url = url.to_string();
-                                        }
-                                        NameTarget::Job(id) => {
-                                            self.name_job = true;
-                                            self.selected = Some(*id);
-                                        }
+        egui::ScrollArea::both()
+            .id_salt("names_table_scroll")
+            .show(ui, |ui| {
+                egui::Grid::new("names_table")
+                    .striped(true)
+                    .spacing([16.0, 8.0])
+                    .show(ui, |ui| {
+                        table_header(
+                            ui,
+                            &[
+                                ("Name", 140.0),
+                                ("Public URL", 300.0),
+                                ("Target", 280.0),
+                                ("State", 140.0),
+                                ("Actions", 90.0),
+                            ],
+                        );
+                        for name in self.names.values() {
+                            table_text(ui, name.label.clone(), 140.0);
+                            link(ui, name.key.url().to_string());
+                            table_text(
+                                ui,
+                                match &name.target {
+                                    NameTarget::Url(url) => url.to_string(),
+                                    NameTarget::Job(id) => self
+                                        .jobs
+                                        .get(id)
+                                        .map(|j| format!("Following {}", job_path(j).display()))
+                                        .unwrap_or_else(|| "Linked data is unavailable".into()),
+                                },
+                                280.0,
+                            );
+                            table_text(
+                                ui,
+                                match &name.state {
+                                    NameState::Disabled => "Disabled".into(),
+                                    NameState::WaitingForJob => "Waiting for data".into(),
+                                    NameState::Publishing { .. } => "Publishing…".into(),
+                                    NameState::Published { .. } => "Published".into(),
+                                    NameState::Failed { error } => {
+                                        format!("Failed: {}", error.message)
                                     }
-                                }
-                                if ui.button("Remove").clicked() {
-                                    self.removal = Some(Removal::Name(name.label.clone()));
-                                }
+                                },
+                                140.0,
+                            );
+                            ui.push_id(&name.label, |ui| {
+                                ui.add_enabled_ui(self.ready && !self.busy, |ui| {
+                                    ui.menu_button("Actions", |ui| {
+                                        if ui.button("Edit").clicked() {
+                                            self.editing_name = true;
+                                            self.name_label = name.label.clone();
+                                            match &name.target {
+                                                NameTarget::Url(url) => {
+                                                    self.name_job = false;
+                                                    self.name_url = url.to_string();
+                                                }
+                                                NameTarget::Job(id) => {
+                                                    self.name_job = true;
+                                                    self.selected = Some(*id);
+                                                }
+                                            }
+                                            ui.close();
+                                        }
+                                        if ui.button("Remove…").clicked() {
+                                            self.removal = Some(Removal::Name(name.label.clone()));
+                                            ui.close();
+                                        }
+                                    });
+                                });
                             });
-                        });
+                            ui.end_row();
+                        }
                     });
-                });
-            }
-        });
+                if self.names.is_empty() {
+                    ui.weak("Create a name pointing to a URL or following your data.");
+                }
+            });
     }
+
     fn settings(&mut self, ui: &mut egui::Ui) {
         ui.heading("Settings");
         ui.checkbox(&mut self.local_paths, "The daemon is on this computer");
@@ -721,10 +782,34 @@ fn content_url(ticket: &BlobTicket) -> String {
         z32::encode(ticket.hash().as_bytes())
     )
 }
+fn table_header(ui: &mut egui::Ui, columns: &[(&str, f32)]) {
+    for (title, width) in columns {
+        ui.add_sized(
+            [*width, 28.0],
+            egui::Label::new(egui::RichText::new(*title).strong()),
+        );
+    }
+    ui.end_row();
+}
+fn table_text(ui: &mut egui::Ui, text: String, width: f32) {
+    ui.add_sized([width, 24.0], egui::Label::new(&text).truncate())
+        .on_hover_text(&text);
+}
 fn link(ui: &mut egui::Ui, url: String) {
-    ui.horizontal_wrapped(|ui| {
-        ui.hyperlink(&url);
-        if ui.small_button("Copy URL").clicked() {
+    ui.horizontal(|ui| {
+        let response = ui
+            .add_sized(
+                [245.0, 24.0],
+                egui::Label::new(egui::RichText::new(&url).color(ui.visuals().hyperlink_color))
+                    .truncate()
+                    .sense(egui::Sense::click()),
+            )
+            .on_hover_text(&url)
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        if response.clicked() {
+            ui.ctx().open_url(egui::OpenUrl::new_tab(&url));
+        }
+        if ui.small_button("Copy").on_hover_text("Copy URL").clicked() {
             ui.ctx().copy_text(url);
         }
     });
