@@ -206,7 +206,10 @@ mod tests {
     fn edits_are_preserved_by_status_updates_and_require_explicit_save() {
         let mut page = Page::default();
         page.receive(GatewaySnapshot {
-            config: GatewayConfig::default(),
+            config: GatewayConfig {
+                enabled: false,
+                ..Default::default()
+            },
             state: GatewayState::Disabled,
         });
         assert!(matches!(
@@ -215,7 +218,10 @@ mod tests {
         ));
         assert!(page.draft.enabled);
         page.receive(GatewaySnapshot {
-            config: GatewayConfig::default(),
+            config: GatewayConfig {
+                enabled: false,
+                ..Default::default()
+            },
             state: GatewayState::Disabled,
         });
         assert!(page.draft.enabled);

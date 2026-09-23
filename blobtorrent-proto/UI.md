@@ -130,6 +130,9 @@ configuration and restarts or stops the gateway. Watch provides runtime updates.
 `GatewayConfig` contains `enabled`, a loopback HTTP listen address, and an optional
 IPv4 index server override. No override means Mainline rendezvous discovery.
 
+Without saved settings, the gateway starts enabled on `127.0.0.1:8080`. An explicitly
+saved disabled setting is preserved.
+
 The gateway is embedded in the daemon process, uses its own iroh endpoint with zero listening ALPNs and its own
 resolver, and browses remote content without depending on the daemon's blob store.
 It stays running after the UI exits and starts with the daemon when enabled.

@@ -805,7 +805,10 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(8);
         app.update(Update::Event(WatchEvent::GatewayUpdated(
             blobtorrent_proto::GatewaySnapshot {
-                config: blobtorrent_proto::GatewayConfig::default(),
+                config: blobtorrent_proto::GatewayConfig {
+                    enabled: false,
+                    ..Default::default()
+                },
                 state: blobtorrent_proto::GatewayState::Disabled,
             },
         )));

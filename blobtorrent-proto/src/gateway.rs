@@ -12,7 +12,7 @@ pub struct GatewayConfig {
 impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             listen: ([127, 0, 0, 1], 8080).into(),
             index_server: None,
         }

@@ -143,7 +143,7 @@ an edit. Press **s** to save and apply, **r** to discard unsaved changes, or Esc
 to return. Applying settings restarts the gateway. Its state is shown as Disabled,
 Starting, Running, or Failed; failures retry every 30 seconds. Settings are saved
 atomically in `STATE_DIR/gateway.json` and restored on daemon startup. The gateway
-is disabled by default. Closing the TUI does not stop it.
+is enabled by default on `127.0.0.1:8080`. An explicitly saved disabled setting is preserved. Closing the TUI does not stop it.
 
 The daemon embeds `iroh-local-gateway` as a library, with its own iroh endpoint and
 Mainline resolver. It streams the content-addressed web through normal network

@@ -156,7 +156,7 @@ impl App {
             name_job: false,
             editing_name: false,
             gateway: None,
-            gateway_enabled: false,
+            gateway_enabled: GatewayConfig::default().enabled,
             gateway_listen: "127.0.0.1:8080".into(),
             gateway_index: String::new(),
             gateway_dirty: false,

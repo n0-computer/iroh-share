@@ -262,7 +262,8 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(20), async {
             let root = tempfile::tempdir()?;
             let mut manager = Manager::load(root.path())?;
-            assert_eq!(manager.snapshot().state, GatewayState::Disabled);
+            assert_eq!(manager.snapshot().state, GatewayState::Starting);
+            assert!(manager.snapshot().config.enabled);
             let config = GatewayConfig { enabled: true, listen: "127.0.0.1:0".parse()?, index_server: Some("127.0.0.1:9".parse()?) };
             manager.controller().set(config.clone()).await?;
             let address = running(&mut manager).await?;
@@ -291,7 +292,15 @@ mod tests {
     async fn failed_save_keeps_config_and_busy_port_reports_failure() -> Result<()> {
         tokio::time::timeout(Duration::from_secs(10), async {
             let root = tempfile::tempdir()?;
+            save(
+                &root.path().join("gateway.json"),
+                &GatewayConfig {
+                    enabled: false,
+                    ..GatewayConfig::default()
+                },
+            )?;
             let mut manager = Manager::load(root.path())?;
+            std::fs::remove_file(root.path().join("gateway.json"))?;
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
             let config = GatewayConfig {
                 enabled: true,

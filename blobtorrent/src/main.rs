@@ -722,6 +722,13 @@ mod tests {
         let (names, _) = names::Names::load(temp.path(), false)?;
         let (_name_updates_tx, name_updates_rx) = mpsc::channel(128);
         let (checkpoints_tx, checkpoints_rx) = mpsc::channel(64);
+        std::fs::write(
+            temp.path().join("gateway.json"),
+            serde_json::to_vec(&blobtorrent_proto::GatewayConfig {
+                enabled: false,
+                ..Default::default()
+            })?,
+        )?;
         let actor = Actor {
             rx,
             jobs: BTreeMap::new(),
