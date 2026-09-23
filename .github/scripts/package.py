@@ -1,0 +1,62 @@
+"""Package native daemon, terminal client, and desktop client release binaries."""
+
+import hashlib
+import pathlib
+import plistlib
+import shutil
+import sys
+import tarfile
+import tempfile
+import tomllib
+import zipfile
+
+
+def package(target: str) -> pathlib.Path:
+    root = pathlib.Path(__file__).resolve().parents[2]
+    binaries = root / "target" / target / "release"
+    dist = root / "dist"
+    dist.mkdir(exist_ok=True)
+    name = f"blobtorrent-{target}"
+    windows = "windows" in target
+    suffix = ".exe" if windows else ""
+    with tempfile.TemporaryDirectory() as temporary:
+        bundle = pathlib.Path(temporary) / name
+        bundle.mkdir()
+        for binary in ("blobtorrent", "blobtorrent-tui", "blobtorrent-gui"):
+            shutil.copy2(binaries / (binary + suffix), bundle / (binary + suffix))
+        shutil.copy2(root / "README.md", bundle / "README.md")
+        shutil.copy2(root / "blobtorrent-proto" / "UI.md", bundle / "UI.md")
+        if "apple" in target:
+            with (root / "Cargo.toml").open("rb") as manifest:
+                version = tomllib.load(manifest)["workspace"]["package"]["version"]
+            contents = bundle / "Blobtorrent.app" / "Contents"
+            (contents / "MacOS").mkdir(parents=True)
+            shutil.copy2(bundle / "blobtorrent-gui", contents / "MacOS" / "blobtorrent-gui")
+            with (contents / "Info.plist").open("wb") as file:
+                plistlib.dump({
+                    "CFBundleExecutable": "blobtorrent-gui",
+                    "CFBundleIdentifier": "computer.n0.blobtorrent",
+                    "CFBundleName": "Blobtorrent",
+                    "CFBundlePackageType": "APPL",
+                    "CFBundleShortVersionString": version,
+                    "CFBundleVersion": version,
+                    "NSHighResolutionCapable": True,
+                }, file)
+        archive = dist / (name + (".zip" if windows else ".tar.gz"))
+        if windows:
+            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as output:
+                for path in sorted(bundle.rglob("*")):
+                    if path.is_file():
+                        output.write(path, path.relative_to(bundle.parent))
+        else:
+            with tarfile.open(archive, "w:gz") as output:
+                output.add(bundle, arcname=name)
+        with archive.open("rb") as file:
+            checksum = hashlib.file_digest(file, "sha256").hexdigest()
+        archive.with_name(archive.name + ".sha256").write_text(f"{checksum}  {archive.name}\n")
+    print(archive)
+    return archive
+
+
+if __name__ == "__main__":
+    package(sys.argv[1])

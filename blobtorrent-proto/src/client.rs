@@ -1,4 +1,4 @@
-//! Optional local client support, shared by the CLI and TUI.
+//! Optional local client support, for native control clients.
 use crate::{
     BlobTicket, ControlProtocol, Download, Job, List, Remove, RpcResult, Share, Watch, WatchEvent,
 };
@@ -40,7 +40,7 @@ impl ControlClient {
     /// Never falls back to daemon state files.
     pub async fn connect_configured(config_dir: &Path) -> Result<Self> {
         let server = configured_address(config_dir)?
-            .context("no daemon configured; start blobtorrent-tui <pairing-ticket>")?;
+            .context("no daemon configured; pair this client using a daemon invitation")?;
         let key = load_or_create_key(&config_dir.join("control-client.key"))?;
         Self::connect_to(server, key).await
     }
@@ -70,6 +70,27 @@ impl ControlClient {
             client.remote = false;
             Ok(client)
         }
+    }
+    pub async fn get_gateway(&self) -> Result<crate::GatewaySnapshot> {
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            self.client.rpc(crate::GetGateway {}),
+        )
+        .await
+        .context("gateway settings request timed out")??
+        .map_err(anyhow::Error::msg)
+    }
+    pub async fn set_gateway(
+        &self,
+        config: crate::GatewayConfig,
+    ) -> Result<crate::GatewaySnapshot> {
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            self.client.rpc(crate::SetGateway { config }),
+        )
+        .await
+        .context("gateway settings request timed out; check current settings before retrying")??
+        .map_err(anyhow::Error::msg)
     }
     pub async fn create_pairing_ticket(&self) -> Result<crate::PairingTicket> {
         tokio::time::timeout(
@@ -357,7 +378,7 @@ mod tests {
             Ok(_) => anyhow::bail!("connected without a configured endpoint"),
             Err(error) => error,
         };
-        assert!(error.to_string().contains("<pairing-ticket>"));
+        assert!(error.to_string().contains("no daemon configured"));
         assert!(!root.path().join("control-client.key").exists());
         Ok(())
     }

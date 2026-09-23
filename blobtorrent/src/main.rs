@@ -1,4 +1,5 @@
 mod control;
+mod gateway;
 mod names;
 mod paths;
 mod recovery;
@@ -118,6 +119,7 @@ struct Actor {
     endpoint: Endpoint,
     access: control::Access,
     pairing: control::Pairing,
+    gateway: gateway::Manager,
     watchers: Vec<irpc::channel::mpsc::Sender<RpcResult<WatchEvent>>>,
     updates_tx: mpsc::Sender<Job>,
     updates_rx: mpsc::Receiver<Job>,
@@ -129,6 +131,11 @@ impl Actor {
         loop {
             let message = tokio::select! {
                 _ = shutdown.changed() => break,
+                result = self.gateway.updates.changed() => {
+                    if result.is_err() { break; }
+                    self.broadcast(WatchEvent::GatewayUpdated(self.gateway.snapshot())).await;
+                    continue;
+                }
                 message = self.rx.recv() => match message { Some(message) => message, None => break },
                 Some(checkpoint) = self.checkpoints_rx.recv() => {
                     let result = self.names.checkpoint(checkpoint.id, checkpoint.phase).map_err(|e| e.to_string());
@@ -154,6 +161,19 @@ impl Actor {
                 }
             };
             match message {
+                ControlMessage::GetGateway(message) => {
+                    let _ = message.tx.send(Ok(self.gateway.snapshot())).await;
+                }
+                ControlMessage::SetGateway(message) => {
+                    let controller = self.gateway.controller();
+                    tokio::spawn(async move {
+                        let result = controller
+                            .set(message.inner.config)
+                            .await
+                            .map_err(|error| format!("{error:#}"));
+                        let _ = message.tx.send(result).await;
+                    });
+                }
                 ControlMessage::CreatePairingTicket(message) => {
                     let ticket = self.pairing.issue(control::pairing_address(&self.endpoint));
                     let _ = message.tx.send(Ok(ticket)).await;
@@ -307,6 +327,11 @@ impl Actor {
                             }
                         }
                     }
+                    if alive {
+                        alive =
+                            send_update(&tx, WatchEvent::GatewayUpdated(self.gateway.snapshot()))
+                                .await;
+                    }
                     if alive && send_update(&tx, WatchEvent::SnapshotComplete).await {
                         self.watchers.push(tx);
                     }
@@ -319,6 +344,7 @@ impl Actor {
         for (_, task) in self.tasks {
             let _ = task.await;
         }
+        self.gateway.shutdown().await;
     }
 
     async fn refresh_names(&mut self) {
@@ -515,6 +541,7 @@ async fn daemon(state_dir: &Path, no_announce: bool) -> Result<()> {
         endpoint: blob_endpoint,
         access,
         pairing,
+        gateway: gateway::Manager::load(state_dir)?,
         watchers: Vec::new(),
         updates_tx,
         updates_rx,
@@ -707,6 +734,7 @@ mod tests {
             endpoint: endpoint.clone(),
             access,
             pairing: control::Pairing::default(),
+            gateway: gateway::Manager::load(temp.path())?,
             watchers: Vec::new(),
             updates_tx,
             updates_rx,
@@ -721,8 +749,43 @@ mod tests {
                 .await?
                 .context("watch closed")?
                 .map_err(anyhow::Error::msg)?,
+            WatchEvent::GatewayUpdated(_)
+        ));
+        assert!(matches!(
+            updates
+                .recv()
+                .await?
+                .context("watch closed")?
+                .map_err(anyhow::Error::msg)?,
             WatchEvent::SnapshotComplete
         ));
+        let gateway = client
+            .rpc(blobtorrent_proto::GetGateway {})
+            .await?
+            .map_err(anyhow::Error::msg)?;
+        assert_eq!(gateway.state, blobtorrent_proto::GatewayState::Disabled);
+        let config = blobtorrent_proto::GatewayConfig {
+            listen: "127.0.0.1:0".parse()?,
+            ..gateway.config
+        };
+        client
+            .rpc(blobtorrent_proto::SetGateway {
+                config: config.clone(),
+            })
+            .await?
+            .map_err(anyhow::Error::msg)?;
+        assert!(
+            matches!(updates.recv().await?.context("watch closed")?.map_err(anyhow::Error::msg)?, WatchEvent::GatewayUpdated(snapshot) if snapshot.config == config)
+        );
+        assert!(client
+            .rpc(blobtorrent_proto::SetGateway {
+                config: blobtorrent_proto::GatewayConfig {
+                    listen: "0.0.0.0:8080".parse()?,
+                    ..config
+                }
+            })
+            .await?
+            .is_err());
         let invitation = client
             .rpc(blobtorrent_proto::CreatePairingTicket {})
             .await?
@@ -792,6 +855,14 @@ mod tests {
         assert!(matches!(
             first,
             WatchEvent::JobUpdated(job) if matches!(job.state, JobState::Seeding { .. })
+        ));
+        assert!(matches!(
+            snapshot
+                .recv()
+                .await?
+                .context("watch closed")?
+                .map_err(anyhow::Error::msg)?,
+            WatchEvent::GatewayUpdated(_)
         ));
         assert!(matches!(
             snapshot

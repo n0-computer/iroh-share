@@ -34,6 +34,7 @@ impl Model {
                 self.names.remove(&label);
             }
             WatchEvent::SnapshotComplete => self.ready = true,
+            WatchEvent::GatewayUpdated(_) => {}
         }
         if self
             .selected_name

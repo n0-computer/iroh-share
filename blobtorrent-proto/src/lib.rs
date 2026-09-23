@@ -26,6 +26,9 @@ pub struct RevokeControl {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListControl {}
 
+mod gateway;
+pub use gateway::*;
+
 mod pairing;
 pub use pairing::*;
 
@@ -162,6 +165,7 @@ pub enum WatchEvent {
     JobRemoved {
         id: u64,
     },
+    GatewayUpdated(GatewaySnapshot),
 }
 
 pub type RpcResult<T> = Result<T, String>;
@@ -197,4 +201,8 @@ pub enum ControlProtocol {
     CompletePath(CompletePath),
     #[rpc(tx=oneshot::Sender<RpcResult<PairingTicket>>)]
     CreatePairingTicket(CreatePairingTicket),
+    #[rpc(tx=oneshot::Sender<RpcResult<GatewaySnapshot>>)]
+    GetGateway(GetGateway),
+    #[rpc(tx=oneshot::Sender<RpcResult<GatewaySnapshot>>)]
+    SetGateway(SetGateway),
 }

@@ -1,5 +1,5 @@
 [workspace]
-members = ["blobtorrent", "blobtorrent-proto", "blobtorrent-tui"]
+members = ["blobtorrent", "blobtorrent-proto", "blobtorrent-tui", "blobtorrent-gui"]
 default-members = ["blobtorrent"]
 resolver = "2"
 
@@ -30,6 +30,7 @@ iroh-blobs = "0.103"
 n0-future = "0.3"
 walkdir = "2"
 blake3 = "1"
+iroh-local-gateway = { git = "https://github.com/n0-computer/iroh-content-discovery.git", rev = "a6eef1b33a5094ecd8976a0635e07331508b4e7e" }
 iroh-mainline-endpoint-discovery = { git = "https://github.com/n0-computer/iroh-content-discovery.git", rev = "a6eef1b33a5094ecd8976a0635e07331508b4e7e" }
 n0-mainline = { version = "0.6", git = "https://github.com/n0-computer/n0-mainline.git", rev = "1c0128550a721326ea183e8ef05c776af569f56f" }
 

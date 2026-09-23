@@ -5,12 +5,13 @@ owns one iroh endpoint and one filesystem blob store shared by all transfers. It
 authenticated QUIC iRPC control API supports starting, listing, watching, and
 removing jobs.
 
-The Cargo workspace has three crates:
+The Cargo workspace has four crates:
 
 - `blobtorrent-proto`: typed iRPC messages and state snapshots, with optional
-  `client` helpers shared by the CLI and TUI.
+  `client` helpers for native clients.
 - `blobtorrent`: daemon and command-line client in one binary.
 - `blobtorrent-tui`: Ratatui terminal interface using the same control protocol.
+- `blobtorrent-gui`: egui desktop interface using the same control protocol.
 
 ```sh
 cargo run -- --state-dir /path/to/state daemon
@@ -21,13 +22,15 @@ cargo run -- --state-dir /path/to/state watch
 cargo run -- --state-dir /path/to/state remove 0
 ```
 
-Start the daemon, then open the TUI in another terminal:
+Start the daemon, then open the desktop GUI:
 
 ```sh
 cargo run -- daemon
 # Paste the ticket printed by the daemon when prompted.
-cargo run -p blobtorrent-tui
+cargo run -p blobtorrent-gui
 ```
+
+For the terminal interface, use `cargo run -p blobtorrent-tui`.
 
 The TUI shows live states and progress. Seeding details start with the collection's
 `https://<z32-hash>.blake3.net/` URL, followed by the hash and ticket; failed jobs
@@ -43,10 +46,11 @@ the daemon through iRPC; the TUI does not inspect its local filesystem. The daem
 the TUI exits. If the connection drops, the TUI reconnects and replaces its job list
 with a fresh snapshot; commands are disabled until that snapshot is complete.
 
-To install the two binaries:
+To install the daemon and either frontend:
 
 ```sh
 cargo install --path blobtorrent
+cargo install --path blobtorrent-gui
 cargo install --path blobtorrent-tui
 ```
 
@@ -90,8 +94,8 @@ optional top-level hash/ticket. Seeding continues until removal or daemon shutdo
 it does not imply that public Mainline publication has succeeded.
 
 `Watch` streams `Result<WatchEvent, String>`. It first emits `JobUpdated` for each
-existing job and `NameUpdated` for each name, then `SnapshotComplete` (also for an empty daemon). Subsequent events
-are complete `JobUpdated`/`NameUpdated` snapshots or `JobRemoved { id }`/`NameRemoved { label }`. Clients replace their
+existing job, `NameUpdated` for each name, and `GatewayUpdated`, then `SnapshotComplete` (also for an empty daemon). Subsequent events
+are complete `JobUpdated`/`NameUpdated`/`GatewayUpdated` snapshots or `JobRemoved { id }`/`NameRemoved { label }`. Clients replace their
 entry on an update and delete it on removal. Slow watchers are disconnected;
 reconnect to obtain a fresh snapshot.
 
@@ -125,6 +129,34 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+## Gateway settings
+
+Press **,** or **F2** to open Settings, or use Tab to cycle through Data, Names,
+and Settings. The page configures the gateway embedded in the daemon:
+
+- **Gateway enabled:** start automatically and keep running with the daemon.
+- **HTTP listen address:** a loopback address, default `127.0.0.1:8080`.
+- **Index server:** an optional IPv4 `host:port`; empty uses Mainline rendezvous discovery.
+
+Use Up/Down to select, Space to toggle, and Enter to edit a field. Ctrl-U clears
+an edit. Press **s** to save and apply, **r** to discard unsaved changes, or Esc
+to return. Applying settings restarts the gateway. Its state is shown as Disabled,
+Starting, Running, or Failed; failures retry every 30 seconds. Settings are saved
+atomically in `STATE_DIR/gateway.json` and restored on daemon startup. The gateway
+is disabled by default. Closing the TUI does not stop it.
+
+The daemon embeds `iroh-local-gateway` as a library, with its own iroh endpoint and
+Mainline resolver. It streams the content-addressed web through normal network
+protocols and does not access the daemon's blob store directly. Its separate endpoint
+can fetch content from the daemon like any other provider. Configure the companion
+browser extension to use the gateway's HTTP address on the daemon machine.
+`--no-announce` disables publication, independently of the gateway setting.
+
+The control protocol exposes `GetGateway`, `SetGateway { config }`, and complete
+`GatewayUpdated` snapshots through Watch. The snapshot includes the desired typed
+configuration and runtime state. Only Running carries a bound HTTP address and
+endpoint ID; only Failed carries an error.
+
 ## Pkarr names
 
 Names provide a stable `https://<public-key>.pkarr.net/` URL pointing to an HTTP(S)
@@ -144,7 +176,7 @@ share imports, its last record continues to be published. Old snapshots are not
 archived. A new name waits for its target job to finish importing or downloading.
 Removing a job pauses its names and prevents automatic restart of that share.
 
-In the TUI, Tab switches between Data and Names. Press n on a selected item to name
+In the TUI, Tab cycles through Data, Names, and Settings. Press n on a selected item to name
 it; in Names, n creates a name, e edits its target, and x removes it after
 confirmation. Targets accept a full HTTP(S) URL, `data:<id>`, or `job:<id>`.
 
@@ -263,3 +295,32 @@ caller-owned endpoint. The allowlist boundary sits at the authenticated connecti
 independent of CLI/TUI or browser transport; no browser UI is included yet.
 
 The daemon writes `control.addr` for local CLI discovery.
+
+## Desktop GUI
+
+Run `cargo run -p blobtorrent-gui --release`. Paste the daemon's one-time ticket
+into the connection screen, or pass it as a positional argument. The GUI keeps
+its own identity and saved daemon address in the platform configuration directory
+under `blobtorrent-gui`; `--config-dir` overrides it.
+
+Data, Names, and Settings provide sharing, downloads, pkarr management, and gateway
+configuration. Content links can be opened or copied; blob tickets are secondary.
+Use **Complete** for paths on the daemon. When both apps share a filesystem,
+enable **The daemon is on this computer** in Settings to choose folders, share
+files/folders by dropping them into the window, and open seeded paths in the
+system file manager. Closing the GUI leaves the daemon and gateway running.
+
+Frontend capabilities and protocol behavior are described in
+[the UI capability guide](blobtorrent-proto/UI.md). Frontends can evolve independently.
+
+## CI and binary releases
+
+GitHub Actions runs formatting, Clippy, and workspace tests on pull requests and
+pushes to `main`. The **Binary releases** workflow builds the daemon, TUI, and GUI
+for Windows x64, macOS Apple Silicon, and macOS Intel. It can be run manually to
+produce downloadable workflow artifacts without creating a release.
+
+Pushing a `v*` tag publishes the archives and SHA-256 checksums as a GitHub Release
+once all three builds succeed. Windows uses ZIP; macOS uses tar.gz and also
+includes a `Blobtorrent.app` bundle. These builds are unsigned and not notarized;
+OS download protections may require explicit approval to run them.

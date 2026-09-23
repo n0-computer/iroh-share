@@ -2,6 +2,7 @@ mod completion;
 mod links;
 mod model;
 mod network;
+mod settings;
 
 use anyhow::{Context, Result};
 use blobtorrent_proto::{BlobTicket, Job, JobKind, JobState};
@@ -64,6 +65,7 @@ enum Input {
 struct App {
     model: Model,
     names_view: bool,
+    settings: settings::Page,
     client_id: Option<blobtorrent_proto::EndpointId>,
     server_id: Option<blobtorrent_proto::EndpointId>,
     link_action: Option<links::Action>,
@@ -78,6 +80,13 @@ struct App {
 impl App {
     fn update(&mut self, update: Update) {
         match update {
+            Update::GatewaySaved(result) => {
+                self.busy = false;
+                self.settings.saved(result);
+            }
+            Update::Event(blobtorrent_proto::WatchEvent::GatewayUpdated(snapshot)) => {
+                self.settings.receive(snapshot)
+            }
             Update::Completion { id, result } => {
                 if let Input::Share(value) | Input::Target { value, .. } = &mut self.input {
                     if let Err(error) = self.completion.receive(id, result, value) {
@@ -134,6 +143,25 @@ impl App {
             return true;
         }
         if matches!(self.input, Input::Browse)
+            && (key.code == KeyCode::F(2) || key.code == KeyCode::Char(','))
+            && self.settings.editing.is_none()
+        {
+            self.settings.open = !self.settings.open;
+            return false;
+        }
+        if self.settings.open {
+            match self.settings.key(key, self.model.ready, self.busy) {
+                settings::Action::None => {}
+                settings::Action::Back => {
+                    self.settings.open = false;
+                    self.names_view = false;
+                }
+                settings::Action::Quit => return true,
+                settings::Action::Save(config) => self.submit(Action::SetGateway(config), tx),
+            }
+            return false;
+        }
+        if matches!(self.input, Input::Browse)
             && key.modifiers.is_empty()
             && matches!(key.code, KeyCode::Char('c' | 'o'))
         {
@@ -149,7 +177,12 @@ impl App {
             return false;
         }
         if key.code == KeyCode::Tab && matches!(self.input, Input::Browse) {
-            self.names_view = !self.names_view;
+            if self.names_view {
+                self.names_view = false;
+                self.settings.open = true;
+            } else {
+                self.names_view = true;
+            }
             self.details_scroll = 0;
             return false;
         }
@@ -286,6 +319,10 @@ impl App {
     }
 
     fn paste(&mut self, text: String) {
+        if self.settings.open {
+            self.settings.paste(text);
+            return;
+        }
         self.completion.reset();
         match &mut self.input {
             Input::Share(value)
@@ -383,6 +420,10 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
+        if self.settings.open {
+            self.settings.draw(frame, self.model.ready);
+            return;
+        }
         let [heading, jobs, details, footer] = Layout::vertical([
             Constraint::Length(2),
             Constraint::Min(5),
@@ -505,9 +546,9 @@ impl App {
         frame.render_widget(
             Paragraph::new(vec![
                 Line::from(if self.names_view {
-                    "Tab data · ↑/↓ select · n create · e retarget · x remove · c copy · o open · q quit"
+                    "Tab settings · , settings · ↑/↓ select · n create · e retarget · x remove · c copy · o open · q quit"
                 } else {
-                    "Tab names · ↑/↓ select · s share · d download · n name · x remove · c copy · o open · q quit"
+                    "Tab names · , settings · ↑/↓ select · s share · d download · n name · x remove · c copy · o open · q quit"
                 })
                 .cyan(),
                 Line::from(clean(&self.status)),
@@ -729,14 +770,14 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, config_dir: PathBuf) -> Re
         loop {
             tokio::select! {
                 _ = tick.tick() => { terminal.draw(|frame| app.draw(frame))?;
-                    if terminal.size()?.height > 1 { links::draw_link(links::selected_url(&app.model, app.names_view).as_ref(), terminal.size()?.width)?; } }
+                    if terminal.size()?.height > 1 { links::draw_link(links::selected_url(&app.model, app.names_view).filter(|_| !app.settings.open).as_ref(), terminal.size()?.width)?; } }
                 Some(outcome) = link_results.recv() => { app.status = links::complete(outcome); }
                 update = updates_rx.recv() => { app.update(update.context("connection worker stopped")?); }
                 event = events.next() => match event.context("terminal input closed")?? {
                     Event::Key(key) => if app.key(key, &actions_tx) { return Ok(()); },
                     Event::Paste(text) => app.paste(text),
                     Event::Resize(_, _) => { terminal.draw(|frame| app.draw(frame))?;
-                    if terminal.size()?.height > 1 { links::draw_link(links::selected_url(&app.model, app.names_view).as_ref(), terminal.size()?.width)?; } }
+                    if terminal.size()?.height > 1 { links::draw_link(links::selected_url(&app.model, app.names_view).filter(|_| !app.settings.open).as_ref(), terminal.size()?.width)?; } }
                     _ => {}
                 }
             }
@@ -757,6 +798,39 @@ mod tests {
     use super::*;
     use blobtorrent_proto::{JobError, WatchEvent};
     use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn settings_page_cycles_and_submits_daemon_configuration() -> Result<()> {
+        let mut app = App::default();
+        let (tx, mut rx) = mpsc::channel(8);
+        app.update(Update::Event(WatchEvent::GatewayUpdated(
+            blobtorrent_proto::GatewaySnapshot {
+                config: blobtorrent_proto::GatewayConfig::default(),
+                state: blobtorrent_proto::GatewayState::Disabled,
+            },
+        )));
+        app.update(Update::Event(WatchEvent::SnapshotComplete));
+        app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), &tx);
+        assert!(app.names_view);
+        app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), &tx);
+        assert!(app.settings.open);
+        app.key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE), &tx);
+        app.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE), &tx);
+        assert!(matches!(rx.try_recv(), Ok(Action::SetGateway(config)) if config.enabled));
+        let mut terminal = Terminal::new(TestBackend::new(110, 30))?;
+        terminal.draw(|frame| app.draw(frame))?;
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("Gateway enabled: yes"));
+        app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), &tx);
+        assert!(!app.settings.open && !app.names_view);
+        Ok(())
+    }
 
     #[test]
     fn disconnected_view_shows_enrollment() -> Result<()> {

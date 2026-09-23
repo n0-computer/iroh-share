@@ -1,0 +1,19 @@
+[package]
+name = "blobtorrent-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "persistence"] }
+rfd = "0.15"
+open = "5"
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+dirs.workspace = true
+z32.workspace = true
+blobtorrent-proto = { workspace = true, features = ["client"] }
+
+[dev-dependencies]
+tempfile.workspace = true

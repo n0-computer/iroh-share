@@ -10,6 +10,7 @@ pub enum Action {
         path: PathBuf,
     },
     Share(PathBuf),
+    ShareMany(Vec<PathBuf>),
     Download {
         ticket: BlobTicket,
         target: PathBuf,
@@ -136,6 +137,17 @@ async fn session(
                     Action::CreateName { label, target } => client.create_name(label, target).await.map(|name| format!("Created {}: {}", name.label, name.key.url())),
                     Action::UpdateName { label, target } => client.update_name(label, target).await.map(|name| format!("Updated {}", name.label)),
                     Action::RemoveName(label) => client.remove_name(label.clone()).await.map(|()| format!("Removed name {label}")),
+                    Action::ShareMany(paths) => {
+                        let mut added = 0;
+                        let mut errors = Vec::new();
+                        for path in paths {
+                            match client.share(path.clone()).await {
+                                Ok(_) => added += 1,
+                                Err(error) => errors.push(format!("{}: {error:#}", path.display())),
+                            }
+                        }
+                        Ok(format!("Shared {added} paths{}", if errors.is_empty() { String::new() } else { format!("; {}", errors.join("; ")) }))
+                    }
                     Action::Share(path) => client.share(path).await.map(|job| format!("Added data {}", job.id)),
                     Action::Download { ticket, target } => client.download(ticket, target).await.map(|job| format!("Added data {}", job.id)),
                     Action::Remove(id) => client.remove(id).await.map(|()| format!("Removed data {id}")),
