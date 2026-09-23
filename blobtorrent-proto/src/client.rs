@@ -17,6 +17,7 @@ pub fn default_state_dir() -> Result<PathBuf> {
         .context("cannot determine the user state directory; provide --state-dir")
 }
 
+#[derive(Clone)]
 pub struct ControlClient {
     client: Client<ControlProtocol>,
     endpoint: Endpoint,
@@ -95,12 +96,18 @@ impl ControlClient {
         .map_err(anyhow::Error::msg)
     }
 
+    pub async fn complete_path(&self, path: PathBuf) -> Result<crate::PathCompletions> {
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            self.client.rpc(crate::CompletePath { path }),
+        )
+        .await
+        .context("path completion timed out")??
+        .map_err(anyhow::Error::msg)
+    }
+
     pub async fn share(&self, path: PathBuf) -> Result<Job> {
         let path = if self.remote {
-            anyhow::ensure!(
-                path.is_absolute(),
-                "remote shares require an absolute path on the daemon"
-            );
             path
         } else {
             tokio::fs::canonicalize(path).await?
@@ -113,10 +120,6 @@ impl ControlClient {
 
     pub async fn download(&self, ticket: BlobTicket, target: PathBuf) -> Result<Job> {
         let target = if self.remote {
-            anyhow::ensure!(
-                target.is_absolute(),
-                "remote downloads require an absolute target on the daemon"
-            );
             target
         } else {
             std::path::absolute(target)?

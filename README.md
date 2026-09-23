@@ -3,7 +3,7 @@
 A background service for sharing and downloading iroh blob collections. The daemon
 owns one iroh endpoint and one filesystem blob store shared by all transfers. Its
 authenticated QUIC iRPC control API supports starting, listing, watching, and
-removing jobs. No swarmie subprocess is required.
+removing jobs.
 
 The Cargo workspace has three crates:
 
@@ -36,9 +36,10 @@ d to enter a ticket and download target, x to remove the selected item (y confir
 PageUp/PageDown to scroll details, and q or Ctrl-C to quit. Escape cancels a prompt.
 In path prompts, Tab completes filenames and directories; repeat Tab to cycle
 matches or Shift-Tab to cycle backwards. A unique directory completion adds a
-separator so another Tab explores it. `~/` expands to your home directory, and
+separator so another Tab explores it. `~/` expands to the daemon user’s home directory, and
 names containing spaces need no quoting. Hidden entries appear when you type a
-leading dot. Paths are relative to the TUI's working directory. The daemon keeps running when
+leading dot. Relative paths use the daemon’s working directory. Completion runs on
+the daemon through iRPC; the TUI does not inspect its local filesystem. The daemon keeps running when
 the TUI exits. If the connection drops, the TUI reconnects and replaces its job list
 with a fresh snapshot; commands are disabled until that snapshot is complete.
 
@@ -55,8 +56,7 @@ Without `--state-dir`, the daemon and CLI use this per-user location:
 - macOS: `~/Library/Application Support/blobtorrent`.
 - Windows: `%LOCALAPPDATA%\blobtorrent`.
 
-`--state-dir` overrides this location. Existing `.blobtorrent` directories are not
-migrated automatically; pass their path explicitly to keep using them.
+`--state-dir` overrides this location.
 
 Use `daemon --no-announce` to disable Mainline announcements and name publication for local testing.
 At startup, the daemon logs endpoint-indexer `host:port` advertisements from the
@@ -67,14 +67,13 @@ to change the default `warn,blobtorrent=info` filter. `--no-announce` skips disc
 
 Normally, a shared Mainline publisher announces completed collections and retries
 on discovery failures. Direct ticket transfers work independently of Mainline.
-This checkout expects `../iroh-content-discovery` for the announcement library.
+The announcement library is pinned to a Git revision in `Cargo.toml`.
 
 The iRPC protocol lives in `blobtorrent-proto/src/lib.rs`. Hashes use `iroh_blobs::Hash`, and tickets
 use `BlobTicket`. Ticket strings are parsed at the CLI boundary. The control server
 shares the blob iroh endpoint on the `/blobtorrent/control/1` ALPN. It checks the
 authenticated remote endpoint ID against a persistent allowlist before dispatching
-RPC requests. There is no bearer token or separate noq control listener. Blob
-connections remain public.
+RPC requests. Blob connections are public.
 
 Each `Job` contains an ID, its original request (`JobKind`), and a `JobState`:
 
@@ -94,8 +93,18 @@ it does not imply that public Mainline publication has succeeded.
 existing job and `NameUpdated` for each name, then `SnapshotComplete` (also for an empty daemon). Subsequent events
 are complete `JobUpdated`/`NameUpdated` snapshots or `JobRemoved { id }`/`NameRemoved { label }`. Clients replace their
 entry on an update and delete it on removal. Slow watchers are disconnected;
-reconnect to obtain a fresh snapshot. This protocol change requires rebuilding
-both daemon and clients.
+reconnect to obtain a fresh snapshot.
+
+`CompletePath { path: PathBuf }` returns `PathCompletions`: a common prefix and
+sorted `PathCandidate { path, kind }` entries, where `kind` is `File` or `Directory`.
+Candidates are absolute daemon paths; directories include a trailing separator.
+Responses contain at most 256 candidates and indicate truncation. Clients can refine
+the prefix for large directories. Hidden names require a leading dot; names that
+cannot be represented as UTF-8 or contain control characters are omitted.
+Completion uses the same endpoint allowlist as other control requests. Directory
+reads run outside the control actor, and the TUI discards responses for edited or
+closed prompts. Share and Download interpret `~/` and relative paths on the daemon;
+the local CLI resolves relative arguments in its working directory before sending them.
 
 The shared store lives in `STATE_DIR/blobs`. Sharing references source files in
 place. Downloads initially write into the store, then export with `TryReference`:
@@ -137,7 +146,7 @@ Removing a job pauses its names and prevents automatic restart of that share.
 
 In the TUI, Tab switches between Data and Names. Press n on a selected item to name
 it; in Names, n creates a name, e edits its target, and x removes it after
-confirmation. Targets accept a full HTTP(S) URL or `data:<id>` (`job:<id>` remains accepted).
+confirmation. Targets accept a full HTTP(S) URL, `data:<id>`, or `job:<id>`.
 
 The daemon signs DNS records and republishes them on Mainline every ten minutes,
 retrying failures after thirty seconds. The Names view and Watch expose publication
@@ -172,8 +181,7 @@ outside the rendering loop.
 
 A share is saved atomically before the daemon accepts it. Removing it saves the
 removal before stopping its task, so it stays removed after restart. Removing or
-retargeting a name leaves its former share intact. Existing name-attached shares
-are migrated automatically to the independent share registry.
+retargeting a name leaves its share intact.
 
 On restart the daemon reimports each registered path; transient progress and
 previous seeding state are not restored as if still current. Changes made while
@@ -194,7 +202,7 @@ This adds a verification read when recovering an interrupted export. Completed
 seeders do not run export again. Keep downloaded files unchanged while seeding,
 as the store references them.
 
-Blobtorrent uses the published `iroh-blobs` crate; no local Cargo patch is required.
+Blobtorrent uses the published `iroh-blobs` crate.
 
 ### Control identities and remote TUI setup
 
@@ -222,14 +230,8 @@ Pair the TUI once, even on the same machine:
 
 The disconnected TUI shows its identity and the authorization command. Change
 servers with `--endpoint <daemon-id>`; the choice persists. Without a saved endpoint,
-it prompts for one rather than looking in the daemon directory. The TUI assumes
-it shares the daemon's filesystem: local path completion, `~/` expansion, and
-relative paths are always available. Paths are made absolute before sending them.
-
-Existing TUI settings in the daemon state directory are not migrated automatically.
-Run the pairing steps above to authorize the TUI's new independent identity.
-The old TUI `--state-dir` and `--local` options are replaced by `--config-dir`
-and explicit endpoint configuration.
+it displays instructions for setting one. Path completion and resolution use the
+daemon’s filesystem, so the TUI can run on another machine.
 
 `blobtorrent control list` lists allowed IDs; `blobtorrent control revoke <id>`
 removes one and closes its active control connections, including Watch streams.
@@ -243,6 +245,4 @@ The native client helper also exposes `ControlClient::from_endpoint` for a
 caller-owned endpoint. The allowlist boundary sits at the authenticated connection,
 independent of CLI/TUI or browser transport; no browser UI is included yet.
 
-This replaces the old control wire protocol: rebuild daemon, CLI and TUI together.
-Old `control.token`, `control.cert`, and `control.port` files are no longer read.
-The daemon writes `control.addr` for local discovery.
+The daemon writes `control.addr` for local CLI discovery.

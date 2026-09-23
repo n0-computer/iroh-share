@@ -75,6 +75,13 @@ struct App {
 impl App {
     fn update(&mut self, update: Update) {
         match update {
+            Update::Completion { id, result } => {
+                if let Input::Share(value) | Input::Target { value, .. } = &mut self.input {
+                    if let Err(error) = self.completion.receive(id, result, value) {
+                        self.status = format!("Cannot complete path: {error}");
+                    }
+                }
+            }
             Update::Connecting => {
                 self.model.reset();
                 self.input = Input::Browse;
@@ -144,12 +151,20 @@ impl App {
             return false;
         }
         if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
-            if let Input::Share(value) | Input::Target { value, .. } = &mut self.input {
-                if let Err(error) = self
-                    .completion
-                    .complete(value, key.code == KeyCode::BackTab)
-                {
-                    self.status = format!("Cannot complete path: {error}");
+            if self.model.ready {
+                if let Input::Share(value) | Input::Target { value, .. } = &mut self.input {
+                    if let Some(id) = self
+                        .completion
+                        .complete(value, key.code == KeyCode::BackTab)
+                    {
+                        if let Err(error) = tx.try_send(Action::CompletePath {
+                            id,
+                            path: PathBuf::from(value.as_str()),
+                        }) {
+                            self.completion.reset();
+                            self.status = format!("Cannot request completion: {error}");
+                        }
+                    }
                 }
             }
             return false;
@@ -281,20 +296,11 @@ impl App {
         }
     }
 
-    fn input_path(&self, value: &str) -> Result<PathBuf> {
-        // Resolve relative paths here: the daemon may have a different working directory.
-        Ok(std::path::absolute(completion::expand_path(value)?)?)
-    }
-
     fn accept_input(&mut self, tx: &mpsc::Sender<Action>) {
         match std::mem::take(&mut self.input) {
-            Input::Share(value) if !value.is_empty() => match self.input_path(&value) {
-                Ok(path) => self.submit(Action::Share(path), tx),
-                Err(error) => {
-                    self.status = error.to_string();
-                    self.input = Input::Share(value);
-                }
-            },
+            Input::Share(value) if !value.is_empty() => {
+                self.submit(Action::Share(value.into()), tx)
+            }
             Input::Ticket(value) => match value.trim().parse() {
                 Ok(ticket) => {
                     self.input = Input::Target {
@@ -307,13 +313,13 @@ impl App {
                     self.input = Input::Ticket(value);
                 }
             },
-            Input::Target { ticket, value } if !value.is_empty() => match self.input_path(&value) {
-                Ok(target) => self.submit(Action::Download { ticket, target }, tx),
-                Err(error) => {
-                    self.status = error.to_string();
-                    self.input = Input::Target { ticket, value };
-                }
-            },
+            Input::Target { ticket, value } if !value.is_empty() => self.submit(
+                Action::Download {
+                    ticket,
+                    target: value.into(),
+                },
+                tx,
+            ),
             Input::NameLabel { value, job } if !value.is_empty() => {
                 if let Some(id) = job {
                     self.submit(
@@ -719,7 +725,7 @@ mod tests {
     use ratatui::{backend::TestBackend, Terminal};
 
     #[test]
-    fn disconnected_view_shows_enrollment_and_completes_local_paths() -> Result<()> {
+    fn disconnected_view_shows_enrollment() -> Result<()> {
         let root = tempfile::tempdir()?;
         let client_id =
             blobtorrent_proto::client::load_or_create_key(&root.path().join("key"))?.public();
@@ -739,22 +745,6 @@ mod tests {
             .collect();
         assert!(text.contains("blobtorrent control allow"));
         assert!(text.contains(&client_id.to_string()));
-        assert_eq!(
-            app.input_path("~/local-path")?,
-            dirs::home_dir().unwrap().join("local-path")
-        );
-        assert_eq!(
-            app.input_path("relative-path")?,
-            std::env::current_dir()?.join("relative-path")
-        );
-        assert_eq!(app.input_path("/srv/data")?, PathBuf::from("/srv/data"));
-        let (tx, _) = mpsc::channel(8);
-        std::fs::write(root.path().join("complete-me"), b"test")?;
-        app.input = Input::Share(root.path().join("complete-").display().to_string());
-        app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), &tx);
-        assert!(
-            matches!(&app.input, Input::Share(value) if value == &root.path().join("complete-me").display().to_string())
-        );
         Ok(())
     }
 
@@ -823,19 +813,57 @@ mod tests {
     }
 
     #[test]
-    fn tab_completes_share_path_without_submitting() -> Result<()> {
-        let dir = tempfile::tempdir()?;
-        let path = dir.path().join("my file.txt");
-        std::fs::write(&path, "hello")?;
+    fn tab_requests_daemon_completion_without_submitting() -> Result<()> {
         let (tx, mut rx) = mpsc::channel(8);
         let mut app = App::default();
         app.model.ready = true;
-        app.input = Input::Share(dir.path().join("my").display().to_string());
+        app.input = Input::Share("~/my".into());
         app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), &tx);
-        assert!(matches!(&app.input, Input::Share(value) if value == &path.display().to_string()));
+        let Action::CompletePath { id, path } = rx.try_recv()? else {
+            panic!("expected completion");
+        };
+        assert_eq!(path, PathBuf::from("~/my"));
+        assert!(!app.busy);
+        app.update(Update::Completion {
+            id,
+            result: Ok(blobtorrent_proto::PathCompletions {
+                common_prefix: "/daemon/my file.txt".into(),
+                candidates: vec![blobtorrent_proto::PathCandidate {
+                    path: "/daemon/my file.txt".into(),
+                    kind: blobtorrent_proto::PathKind::File,
+                }],
+                truncated: false,
+            }),
+        });
+        assert!(matches!(&app.input, Input::Share(value) if value == "/daemon/my file.txt"));
         assert!(rx.try_recv().is_err());
         app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &tx);
-        assert!(matches!(rx.try_recv(), Ok(Action::Share(value)) if value == path));
+        assert!(
+            matches!(rx.try_recv(), Ok(Action::Share(value)) if value == std::path::Path::new("/daemon/my file.txt"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn submission_preserves_daemon_relative_paths_and_edits_discard_completion() -> Result<()> {
+        let (tx, mut rx) = mpsc::channel(8);
+        let mut app = App::default();
+        app.model.ready = true;
+        app.input = Input::Share("~/remote".into());
+        app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), &tx);
+        let Action::CompletePath { id, .. } = rx.try_recv()? else {
+            panic!("expected completion");
+        };
+        app.key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE), &tx);
+        app.update(Update::Completion {
+            id,
+            result: Err("stale error".into()),
+        });
+        assert!(!app.status.contains("stale error"));
+        app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &tx);
+        assert!(
+            matches!(rx.try_recv(), Ok(Action::Share(path)) if path == std::path::Path::new("~/remotex"))
+        );
         Ok(())
     }
 

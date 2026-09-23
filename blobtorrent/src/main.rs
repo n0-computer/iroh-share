@@ -1,5 +1,6 @@
 mod control;
 mod names;
+mod paths;
 mod recovery;
 mod transfer;
 
@@ -150,6 +151,19 @@ impl Actor {
                 }
             };
             match message {
+                ControlMessage::CompletePath(message) => {
+                    // Directory I/O must not hold up Watch events or other control requests.
+                    tokio::spawn(async move {
+                        let result = tokio::task::spawn_blocking(move || {
+                            paths::complete(&message.inner.path)
+                        })
+                        .await
+                        .map_err(anyhow::Error::from)
+                        .and_then(|result| result)
+                        .map_err(|error| format!("{error:#}"));
+                        let _ = message.tx.send(result).await;
+                    });
+                }
                 ControlMessage::AllowControl(message) => {
                     let result = self
                         .access
@@ -335,6 +349,11 @@ impl Actor {
     }
 
     fn start(&mut self, mut kind: JobKind) -> RpcResult<Job> {
+        let path = match &mut kind {
+            JobKind::Share { path } => path,
+            JobKind::Download { target, .. } => target,
+        };
+        *path = paths::resolve(path).map_err(|e| e.to_string())?;
         match &mut kind {
             JobKind::Share { path } => {
                 *path = path.canonicalize().map_err(|e| e.to_string())?;
@@ -677,6 +696,25 @@ mod tests {
                 .map_err(anyhow::Error::msg)?,
             WatchEvent::SnapshotComplete
         ));
+        let completions = client
+            .rpc(blobtorrent_proto::CompletePath {
+                path: temp.path().join("hell"),
+            })
+            .await?
+            .map_err(anyhow::Error::msg)?;
+        assert_eq!(
+            completions.candidates,
+            vec![blobtorrent_proto::PathCandidate {
+                path: source.clone(),
+                kind: blobtorrent_proto::PathKind::File,
+            }]
+        );
+        assert!(client
+            .rpc(blobtorrent_proto::CompletePath {
+                path: temp.path().join("missing/")
+            })
+            .await?
+            .is_err());
         let started = client
             .rpc(Share {
                 path: source.clone(),

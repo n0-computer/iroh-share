@@ -362,6 +362,7 @@ dependencies = [
  "blake3",
  "blobtorrent-proto",
  "clap",
+ "dirs",
  "hex",
  "iroh",
  "iroh-blobs",

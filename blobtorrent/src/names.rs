@@ -72,8 +72,8 @@ impl Names {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Database::default(),
             Err(error) => return Err(error.into()),
         };
-        // Migrate old name-attached paths before exposing the registry. Once
-        // migrated, deleting or retargeting a name must not delete its share.
+        // Register name-attached paths independently so deleting or retargeting
+        // a name does not delete its share.
         let mut migrated = false;
         for entry in db.entries.values() {
             if let (NameTarget::Job(id), Some(path)) = (&entry.target, &entry.share_path) {

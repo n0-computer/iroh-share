@@ -51,6 +51,34 @@ pub struct List {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Watch {}
 
+/// Complete a path using the daemon's filesystem, home and working directory.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletePath {
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PathKind {
+    File,
+    Directory,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PathCandidate {
+    /// Absolute daemon path; directories include the daemon's trailing separator.
+    pub path: PathBuf,
+    pub kind: PathKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PathCompletions {
+    /// Safe common prefix, computed with the daemon's path syntax.
+    pub common_prefix: PathBuf,
+    pub candidates: Vec<PathCandidate>,
+    /// At most 256 sorted candidates are returned; refine the prefix if truncated.
+    pub truncated: bool,
+}
+
 /// Counters for importing a known set of source files.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ImportProgress {
@@ -162,4 +190,6 @@ pub enum ControlProtocol {
     Remove(Remove),
     #[rpc(tx=mpsc::Sender<RpcResult<WatchEvent>>)]
     Watch(Watch),
+    #[rpc(tx=oneshot::Sender<RpcResult<PathCompletions>>)]
+    CompletePath(CompletePath),
 }

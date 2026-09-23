@@ -4,6 +4,10 @@ use std::{path::PathBuf, time::Duration};
 use tokio::sync::mpsc;
 
 pub enum Action {
+    CompletePath {
+        id: u64,
+        path: PathBuf,
+    },
     Share(PathBuf),
     Download {
         ticket: BlobTicket,
@@ -22,6 +26,10 @@ pub enum Action {
 }
 
 pub enum Update {
+    Completion {
+        id: u64,
+        result: Result<blobtorrent_proto::PathCompletions, String>,
+    },
     Connecting,
     Event(WatchEvent),
     Disconnected(String),
@@ -90,6 +98,7 @@ async fn session(
     tokio::time::timeout(Duration::from_secs(15), snapshot)
         .await
         .context("initial snapshot timed out")??;
+    let mut completions = tokio::task::JoinSet::new();
     loop {
         tokio::select! {
             _ = tx.closed() => return Ok(()),
@@ -97,9 +106,20 @@ async fn session(
                 let event = event?.context("daemon disconnected")?.map_err(anyhow::Error::msg)?;
                 tx.send(Update::Event(event)).await?;
             }
+            Some(result) = completions.join_next() => {
+                if let Ok(update) = result { tx.send(update).await?; }
+            }
             action = actions.recv() => {
                 let Some(action) = action else { return Ok(()); };
                 let result = match action {
+                    Action::CompletePath { id, path } => {
+                        completions.abort_all();
+                        let client = client.clone();
+                        completions.spawn(async move {
+                            Update::Completion { id, result: client.complete_path(path).await.map_err(|error| format!("{error:#}")) }
+                        });
+                        continue;
+                    }
                     Action::CreateName { label, target } => client.create_name(label, target).await.map(|name| format!("Created {}: {}", name.label, name.key.url())),
                     Action::UpdateName { label, target } => client.update_name(label, target).await.map(|name| format!("Updated {}", name.label)),
                     Action::RemoveName(label) => client.remove_name(label.clone()).await.map(|()| format!("Removed name {label}")),

@@ -1,205 +1,186 @@
-use std::{
-    io,
-    path::{Path, PathBuf, MAIN_SEPARATOR},
-};
+use blobtorrent_proto::{PathCompletions, PathKind};
 
 #[derive(Default)]
 pub struct Completion {
-    matches: Vec<String>,
+    result: Option<PathCompletions>,
     selected: Option<usize>,
     last_value: String,
+    next_id: u64,
+    pending: Option<(u64, String, bool)>,
 }
 
 impl Completion {
     pub fn reset(&mut self) {
-        *self = Self::default();
+        self.result = None;
+        self.selected = None;
+        self.last_value.clear();
+        self.pending = None;
     }
 
-    pub fn complete(&mut self, value: &mut String, backwards: bool) -> io::Result<()> {
-        self.complete_with_home(value, backwards, dirs::home_dir().as_deref())
+    /// Cycle cached results or return a new request ID. Repeated Tab while a
+    /// request is pending does not flood the daemon.
+    pub fn complete(&mut self, value: &mut String, backwards: bool) -> Option<u64> {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|(_, original, _)| original == value)
+        {
+            return None;
+        }
+        if self.result.is_some() && self.last_value == *value {
+            self.cycle(value, backwards);
+            return None;
+        }
+        self.reset();
+        self.next_id += 1;
+        self.pending = Some((self.next_id, value.clone(), backwards));
+        Some(self.next_id)
     }
 
-    fn complete_with_home(
+    /// Ignore responses for text or prompts that have changed since the request.
+    pub fn receive(
         &mut self,
+        id: u64,
+        result: Result<PathCompletions, String>,
         value: &mut String,
-        backwards: bool,
-        home: Option<&Path>,
-    ) -> io::Result<()> {
-        if value == "~" {
-            expand_home(value, home)?;
-            value.push(MAIN_SEPARATOR);
+    ) -> Result<(), String> {
+        let Some((pending_id, original, backwards)) = &self.pending else {
+            return Ok(());
+        };
+        if *pending_id != id || original != value {
+            return Ok(());
         }
-        if self.matches.is_empty() || *value != self.last_value {
+        let backwards = *backwards;
+        self.pending = None;
+        let result = result?;
+        let common = result.common_prefix.to_string_lossy().into_owned();
+        let extend =
+            !backwards && !result.truncated && result.candidates.len() > 1 && common != *value;
+        self.result = Some(result);
+        if extend {
+            *value = common;
+            self.last_value = value.clone();
+        } else {
+            self.cycle(value, backwards);
+        }
+        Ok(())
+    }
+
+    fn cycle(&mut self, value: &mut String, backwards: bool) {
+        let Some(result) = &self.result else {
+            return;
+        };
+        let count = result.candidates.len();
+        if count == 0 {
             self.reset();
-            self.matches = candidates(value, home)?;
-            if self.matches.is_empty() {
-                return Ok(());
-            }
-            let common = common_prefix(&self.matches);
-            if !backwards && self.matches.len() > 1 && common.len() > value.len() {
-                *value = common;
-                self.last_value = value.clone();
-                return Ok(());
-            }
+            return;
         }
-        let count = self.matches.len();
         let index = match (self.selected, backwards) {
             (None, false) => 0,
             (None, true) => count - 1,
             (Some(i), false) => (i + 1) % count,
             (Some(i), true) => (i + count - 1) % count,
         };
-        *value = self.matches[index].clone();
+        let candidate = &result.candidates[index];
+        *value = candidate.path.to_string_lossy().into_owned();
         self.selected = Some(index);
         self.last_value = value.clone();
-        // A unique directory can be explored further with the very next Tab.
-        if count == 1 && value.ends_with(MAIN_SEPARATOR) {
+        // Use the daemon's kind, not the client's separator conventions.
+        if count == 1 && !result.truncated && candidate.kind == PathKind::Directory {
             self.reset();
         }
-        Ok(())
     }
 
     pub fn hint(&self) -> String {
-        if self.matches.is_empty() {
-            return "Tab completes paths · Shift-Tab cycles backwards".into();
+        if self.pending.is_some() {
+            return "Completing on daemon…".into();
         }
-        let count = self.matches.len();
-        let preview = self
-            .matches
+        let Some(result) = &self.result else {
+            return "Tab completes daemon paths · Shift-Tab cycles backwards".into();
+        };
+        let preview = result
+            .candidates
             .iter()
             .take(3)
-            .cloned()
+            .map(|entry| entry.path.display().to_string())
             .collect::<Vec<_>>()
             .join("  |  ");
         format!(
-            "{count} match{}: {preview}{}",
-            if count == 1 { "" } else { "es" },
-            if count > 3 { " …" } else { "" }
+            "{} matches{}: {preview}",
+            result.candidates.len(),
+            if result.truncated {
+                " (more available; refine path)"
+            } else {
+                ""
+            }
         )
     }
-}
-
-pub fn expand_path(value: &str) -> io::Result<PathBuf> {
-    expand_home(value, dirs::home_dir().as_deref())
-}
-
-fn expand_home(value: &str, home: Option<&Path>) -> io::Result<PathBuf> {
-    if value == "~" {
-        return home.map(Path::to_owned).ok_or_else(missing_home);
-    }
-    if let Some(rest) = value
-        .strip_prefix('~')
-        .filter(|s| s.starts_with(std::path::is_separator))
-    {
-        return home
-            .map(|path| path.join(rest.trim_start_matches(std::path::is_separator)))
-            .ok_or_else(missing_home);
-    }
-    Ok(value.into())
-}
-
-fn missing_home() -> io::Error {
-    io::Error::new(io::ErrorKind::NotFound, "cannot determine home directory")
-}
-
-fn candidates(value: &str, home: Option<&Path>) -> io::Result<Vec<String>> {
-    let (prefix, partial) = match value.rfind(std::path::is_separator) {
-        Some(index) => value.split_at(index + 1),
-        None => ("", value),
-    };
-    let directory = if prefix.is_empty() {
-        PathBuf::from(".")
-    } else {
-        expand_home(prefix, home)?
-    };
-    let mut matches = Vec::new();
-    for entry in std::fs::read_dir(directory)? {
-        let entry = entry?;
-        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
-            continue;
-        };
-        if !name.starts_with(partial)
-            || (name.starts_with('.') && !partial.starts_with('.'))
-            || name.chars().any(char::is_control)
-        {
-            continue;
-        }
-        let suffix = if entry.path().is_dir() {
-            MAIN_SEPARATOR.to_string()
-        } else {
-            String::new()
-        };
-        matches.push(format!("{prefix}{name}{suffix}"));
-    }
-    matches.sort();
-    Ok(matches)
-}
-
-fn common_prefix(values: &[String]) -> String {
-    let mut prefix = values[0].clone();
-    for value in &values[1..] {
-        let bytes = prefix
-            .chars()
-            .zip(value.chars())
-            .take_while(|(a, b)| a == b)
-            .map(|(c, _)| c.len_utf8())
-            .sum();
-        prefix.truncate(bytes);
-    }
-    prefix
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn completes_common_prefix_and_cycles_both_directions() -> io::Result<()> {
-        let dir = tempfile::tempdir()?;
-        std::fs::write(dir.path().join("résumé one.txt"), "")?;
-        std::fs::write(dir.path().join("résumé two.txt"), "")?;
-        let base = format!("{}{MAIN_SEPARATOR}", dir.path().display());
-        let mut value = format!("{base}r");
-        let mut completion = Completion::default();
-        completion.complete_with_home(&mut value, false, None)?;
-        assert_eq!(value, format!("{base}résumé "));
-        completion.complete_with_home(&mut value, false, None)?;
-        assert_eq!(value, format!("{base}résumé one.txt"));
-        completion.complete_with_home(&mut value, false, None)?;
-        assert_eq!(value, format!("{base}résumé two.txt"));
-        completion.complete_with_home(&mut value, true, None)?;
-        assert_eq!(value, format!("{base}résumé one.txt"));
-        // An edit invalidates the previous candidate set.
-        value = format!("{base}missing");
-        completion.complete_with_home(&mut value, false, None)?;
-        assert_eq!(value, format!("{base}missing"));
-        Ok(())
+    use blobtorrent_proto::PathCandidate;
+    fn suggestions() -> PathCompletions {
+        PathCompletions {
+            common_prefix: "/daemon/résumé ".into(),
+            candidates: ["/daemon/résumé one", "/daemon/résumé two"]
+                .into_iter()
+                .map(|path| PathCandidate {
+                    path: path.into(),
+                    kind: PathKind::File,
+                })
+                .collect(),
+            truncated: false,
+        }
     }
-
     #[test]
-    fn descends_directories_and_expands_home_on_submission() -> io::Result<()> {
-        let dir = tempfile::tempdir()?;
-        std::fs::create_dir(dir.path().join("folder"))?;
-        std::fs::write(dir.path().join("folder/file.txt"), "")?;
-        std::fs::write(dir.path().join(".hidden"), "")?;
-        let mut value = format!("~{MAIN_SEPARATOR}f");
+    fn cycles_daemon_results_and_ignores_stale_responses() {
         let mut completion = Completion::default();
-        completion.complete_with_home(&mut value, false, Some(dir.path()))?;
-        assert_eq!(value, format!("~{MAIN_SEPARATOR}folder{MAIN_SEPARATOR}"));
-        completion.complete_with_home(&mut value, false, Some(dir.path()))?;
-        assert_eq!(
-            expand_home(&value, Some(dir.path()))?,
-            dir.path().join("folder/file.txt")
-        );
-        assert_eq!(
-            candidates(&format!("~{MAIN_SEPARATOR}"), Some(dir.path()))?.len(),
-            1
-        );
-        assert_eq!(
-            candidates(&format!("~{MAIN_SEPARATOR}."), Some(dir.path()))?,
-            vec![format!("~{MAIN_SEPARATOR}.hidden")]
-        );
-        assert!(candidates(&format!("~{MAIN_SEPARATOR}missing/"), Some(dir.path())).is_err());
-        Ok(())
+        let mut value = "~/r".to_owned();
+        let id = completion.complete(&mut value, false).unwrap();
+        assert!(completion.complete(&mut value, false).is_none());
+        completion
+            .receive(id, Ok(suggestions()), &mut value)
+            .unwrap();
+        assert_eq!(value, "/daemon/résumé ");
+        assert!(completion.complete(&mut value, false).is_none());
+        assert_eq!(value, "/daemon/résumé one");
+        completion.complete(&mut value, true);
+        assert_eq!(value, "/daemon/résumé two");
+        completion.reset();
+        value = "edited".into();
+        let new_id = completion.complete(&mut value, false).unwrap();
+        assert_ne!(new_id, id);
+        completion
+            .receive(id, Ok(suggestions()), &mut value)
+            .unwrap();
+        assert_eq!(value, "edited");
+        completion
+            .receive(new_id, Err("permission denied".into()), &mut value)
+            .unwrap_err();
+        assert_eq!(value, "edited");
+    }
+    #[test]
+    fn directory_kind_controls_descent_with_foreign_separators() {
+        let mut completion = Completion::default();
+        let mut value = "C:\\da".to_owned();
+        let id = completion.complete(&mut value, false).unwrap();
+        completion
+            .receive(
+                id,
+                Ok(PathCompletions {
+                    common_prefix: "C:\\data\\".into(),
+                    candidates: vec![PathCandidate {
+                        path: "C:\\data\\".into(),
+                        kind: PathKind::Directory,
+                    }],
+                    truncated: false,
+                }),
+                &mut value,
+            )
+            .unwrap();
+        assert_eq!(value, "C:\\data\\");
+        assert!(completion.complete(&mut value, false).is_some());
     }
 }
