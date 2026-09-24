@@ -3015,7 +3015,7 @@ dependencies = [
 [[package]]
 name = "iroh-local-gateway"
 version = "0.1.0"
-source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=a6eef1b33a5094ecd8976a0635e07331508b4e7e#a6eef1b33a5094ecd8976a0635e07331508b4e7e"
+source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=70ffbd9cac81805675644239d8c7654ea2beff48#70ffbd9cac81805675644239d8c7654ea2beff48"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3034,6 +3034,7 @@ dependencies = [
  "n0-future",
  "n0-mainline",
  "percent-encoding",
+ "postcard",
  "rand 0.10.3",
  "simple-dns",
  "tokio",
@@ -3047,7 +3048,7 @@ dependencies = [
 [[package]]
 name = "iroh-mainline-endpoint-discovery"
 version = "0.1.0"
-source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=a6eef1b33a5094ecd8976a0635e07331508b4e7e#a6eef1b33a5094ecd8976a0635e07331508b4e7e"
+source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=70ffbd9cac81805675644239d8c7654ea2beff48#70ffbd9cac81805675644239d8c7654ea2beff48"
 dependencies = [
  "async-stream",
  "blake3",
@@ -6395,7 +6396,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 [[package]]
 name = "udp-addr-index-proto"
 version = "0.1.0"
-source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=a6eef1b33a5094ecd8976a0635e07331508b4e7e#a6eef1b33a5094ecd8976a0635e07331508b4e7e"
+source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=70ffbd9cac81805675644239d8c7654ea2beff48#70ffbd9cac81805675644239d8c7654ea2beff48"
 dependencies = [
  "postcard",
  "serde",
