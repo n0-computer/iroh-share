@@ -3,7 +3,10 @@
 
 #[cfg(target_os = "macos")]
 #[path = "../background_macos.rs"]
-mod macos;
+mod agent;
+#[cfg(target_os = "linux")]
+#[path = "../background_linux.rs"]
+mod agent;
 
 use anyhow::{Context, Result};
 use blobtorrent_proto::client::{self, ControlClient};
@@ -32,11 +35,13 @@ struct Args {
 #[derive(Subcommand)]
 enum Action {
     Stop,
-    /// Install and start the current user's macOS LaunchAgent.
-    #[cfg(target_os = "macos")]
+    /// Install and start the current user's login agent.
+    ///
+    /// This is a LaunchAgent on macOS and a systemd user service on Linux.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     InstallAgent,
-    /// Stop and unregister the current user's macOS LaunchAgent.
-    #[cfg(target_os = "macos")]
+    /// Stop and unregister the current user's login agent.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     RemoveAgent,
 }
 
@@ -63,10 +68,10 @@ async fn main() -> Result<()> {
 }
 
 async fn run(state: &Path, args: Args) -> Result<()> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     match args.command {
-        Some(Action::InstallAgent) => return macos::install(state, args.gui_config_dir).await,
-        Some(Action::RemoveAgent) => return macos::remove(state).await,
+        Some(Action::InstallAgent) => return agent::install(state, args.gui_config_dir).await,
+        Some(Action::RemoveAgent) => return agent::remove(state).await,
         _ => {}
     }
     if matches!(args.command, Some(Action::Stop)) {

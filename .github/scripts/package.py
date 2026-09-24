@@ -19,6 +19,7 @@ def package(target: str) -> pathlib.Path:
     dist.mkdir(exist_ok=True)
     name = f"blobtorrent-{target}"
     windows = "windows" in target
+    linux = "linux" in target
     suffix = ".exe" if windows else ""
     with tempfile.TemporaryDirectory() as temporary:
         bundle = pathlib.Path(temporary) / name
@@ -27,8 +28,18 @@ def package(target: str) -> pathlib.Path:
             shutil.copy2(binaries / (binary + suffix), bundle / (binary + suffix))
         if windows:
             shutil.copy2(binaries / "blobtorrent-background.exe", bundle / "blobtorrent-background.exe")
-        shutil.copy2(root / "README.md", bundle / "README.md")
-        shutil.copy2(root / "blobtorrent-proto" / "UI.md", bundle / "UI.md")
+        if linux:
+            # Per-user installer: binaries, helper, scripts and a plain-text README at the top.
+            shutil.copy2(binaries / "blobtorrent-background", bundle / "blobtorrent-background")
+            for script in ("install.sh", "uninstall.sh", "README"):
+                shutil.copy2(root / "packaging" / "linux" / script, bundle / script)
+                (bundle / script).chmod(0o755 if script.endswith(".sh") else 0o644)
+            docs = bundle / "docs"
+            docs.mkdir()
+        else:
+            docs = bundle
+        shutil.copy2(root / "README.md", docs / "README.md")
+        shutil.copy2(root / "blobtorrent-proto" / "UI.md", docs / "UI.md")
         if "apple" in target:
             with (root / "Cargo.toml").open("rb") as manifest:
                 version = tomllib.load(manifest)["workspace"]["package"]["version"]
