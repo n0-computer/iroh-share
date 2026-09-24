@@ -675,7 +675,7 @@ dependencies = [
 
 [[package]]
 name = "blobtorrent"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "bao-tree",
@@ -708,7 +708,7 @@ dependencies = [
 
 [[package]]
 name = "blobtorrent-gui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "blobtorrent-proto",
@@ -724,7 +724,7 @@ dependencies = [
 
 [[package]]
 name = "blobtorrent-proto"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "dirs",
@@ -746,7 +746,7 @@ dependencies = [
 
 [[package]]
 name = "blobtorrent-tui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arboard",
