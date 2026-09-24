@@ -46,7 +46,14 @@ the daemon through iRPC; the TUI does not inspect its local filesystem. The daem
 the TUI exits. If the connection drops, the TUI reconnects and replaces its job list
 with a fresh snapshot; commands are disabled until that snapshot is complete.
 
-To install the daemon and either frontend:
+On Linux, the release archive `blobtorrent-<arch>-unknown-linux-gnu.tar.gz` ships
+the four binaries with a per-user `install.sh`. The script explains what it will do
+and asks before installing into `~/.local/share/blobtorrent`, linking the programs
+into `~/.local/bin`, and registering a `blobtorrent.service` systemd user service
+that starts the daemon at login. See the plain `README` inside the archive, and
+`packaging/linux/` in this repository. Windows and macOS releases ship installers.
+
+To install the daemon and either frontend from source:
 
 ```sh
 cargo install --path blobtorrent

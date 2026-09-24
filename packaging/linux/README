@@ -1,0 +1,69 @@
+Blobtorrent for Linux
+=====================
+
+This archive contains four programs built for one CPU architecture, plus
+a per-user installer:
+
+  blobtorrent             daemon and command-line client
+  blobtorrent-background  starts, stops and registers the daemon
+  blobtorrent-gui         desktop app
+  blobtorrent-tui         terminal user interface
+  install.sh              per-user installer (see below)
+  uninstall.sh            per-user uninstaller (copied by install.sh)
+  docs/                   project README and user-interface notes
+
+Requirements: a 64-bit x86 or ARM Linux system with glibc 2.35 or newer
+(Ubuntu 22.04, Debian 12, Fedora 36 and anything newer) and a systemd
+user session, which every common desktop login provides. The desktop
+app also needs a Wayland or X11 display with OpenGL.
+
+Install
+-------
+
+Unpack the archive, then run install.sh as your own user, without sudo.
+It prints what it is about to do and asks for confirmation:
+
+  tar xzf blobtorrent-*-linux-gnu.tar.gz
+  cd blobtorrent-*-linux-gnu
+  ./install.sh
+
+install.sh does the following, all inside your home directory:
+
+  1. Copies the four programs to ~/.local/share/blobtorrent/bin.
+  2. Links them into ~/.local/bin so they are on your PATH.
+  3. Writes a systemd user service, blobtorrent.service, to
+     ~/.config/systemd/user, enables it so the daemon starts when you
+     log in, and starts it now.
+  4. Adds "Blobtorrent" to your application menu.
+  5. Pairs the desktop app with the local daemon, unless the app is
+     already configured, for example with a remote daemon.
+
+Running install.sh again over an existing installation stops the
+daemon, replaces the programs and restarts the service. Your data is
+kept. Pass --yes to skip the confirmation prompt, for scripted installs.
+
+Use
+---
+
+  blobtorrent-gui              desktop app, also in your application menu
+  blobtorrent-tui              terminal interface
+  blobtorrent list             command line
+  systemctl --user status blobtorrent.service
+  systemctl --user restart blobtorrent.service
+
+Shared files and daemon state live in ~/.local/state/blobtorrent (or
+$XDG_STATE_HOME/blobtorrent). The daemon writes daemon.log there, and
+the installer writes launcher.log there when something goes wrong.
+
+The service only runs while you are logged in. To keep it running after
+you log out, run: loginctl enable-linger
+
+Uninstall
+---------
+
+  ~/.local/share/blobtorrent/uninstall.sh
+
+This stops and removes the service, the menu entry, the links and the
+programs. Your data and settings in ~/.local/state and ~/.config stay.
+
+Paths above follow the XDG base directory variables when they are set.
