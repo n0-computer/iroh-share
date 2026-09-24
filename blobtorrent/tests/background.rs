@@ -68,6 +68,45 @@ async fn background_setup_pairs_once_and_preserves_remote_configuration() -> Res
         .join("daemon.key")
         .try_exists()
         .context("state check")?);
+    #[cfg(unix)]
+    {
+        let mut process = Command::new(env!("CARGO_BIN_EXE_blobtorrent"))
+            .arg("--state-dir")
+            .arg(&state)
+            .arg("daemon")
+            .arg("--no-announce")
+            .arg("--no-pairing-ticket")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()?;
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                if let Ok(owner) = ControlClient::connect_local(&state).await {
+                    if owner.list().await.is_ok() {
+                        break;
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        })
+        .await?;
+        assert!(Command::new("/bin/kill")
+            .arg("-TERM")
+            .arg(process.id().to_string())
+            .status()?
+            .success());
+        let status = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                if let Some(status) = process.try_wait()? {
+                    break Ok::<_, std::io::Error>(status);
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        })
+        .await??;
+        assert!(status.success());
+        assert!(!state.join("control.addr").exists());
+    }
     drop(background);
     Ok(())
 }

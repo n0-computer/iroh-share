@@ -1,6 +1,10 @@
 //! Per-user background launcher and installer lifecycle helper.
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
+#[cfg(target_os = "macos")]
+#[path = "../background_macos.rs"]
+mod macos;
+
 use anyhow::{Context, Result};
 use blobtorrent_proto::client::{self, ControlClient};
 use clap::{Parser, Subcommand};
@@ -28,6 +32,12 @@ struct Args {
 #[derive(Subcommand)]
 enum Action {
     Stop,
+    /// Install and start the current user's macOS LaunchAgent.
+    #[cfg(target_os = "macos")]
+    InstallAgent,
+    /// Stop and unregister the current user's macOS LaunchAgent.
+    #[cfg(target_os = "macos")]
+    RemoveAgent,
 }
 
 #[tokio::main]
@@ -53,6 +63,12 @@ async fn main() -> Result<()> {
 }
 
 async fn run(state: &Path, args: Args) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    match args.command {
+        Some(Action::InstallAgent) => return macos::install(state, args.gui_config_dir).await,
+        Some(Action::RemoveAgent) => return macos::remove(state).await,
+        _ => {}
+    }
     if matches!(args.command, Some(Action::Stop)) {
         anyhow::ensure!(!args.setup_gui, "--setup-gui cannot be used with stop");
         return stop(state).await;
@@ -63,7 +79,14 @@ async fn run(state: &Path, args: Args) -> Result<()> {
     if !running(state)? {
         spawn(state)?;
     }
-    let owner = tokio::time::timeout(Duration::from_secs(45), async {
+    let owner = wait_for_owner(state).await?;
+    if args.setup_gui {
+        setup_gui(&owner, args.gui_config_dir).await?;
+    }
+    Ok(())
+}
+async fn wait_for_owner(state: &Path) -> Result<ControlClient> {
+    tokio::time::timeout(Duration::from_secs(45), async {
         loop {
             let attempt = async {
                 let owner = ControlClient::connect_local(state).await?;
@@ -77,18 +100,17 @@ async fn run(state: &Path, args: Args) -> Result<()> {
         }
     })
     .await
-    .context("daemon did not become ready; see daemon.log")?;
-    if args.setup_gui {
-        let config = args
-            .gui_config_dir
-            .or_else(|| dirs::config_dir().map(|p| p.join("blobtorrent-gui")))
-            .context("cannot determine GUI configuration directory")?;
-        // An existing choice, including a remote daemon, belongs to the user.
-        if client::configured_endpoint(&config)?.is_none() {
-            let ticket = owner.create_pairing_ticket().await?;
-            client::pair(&config, &ticket).await?;
-            std::fs::write(config.join("local-endpoint"), ticket.addr.id.to_string())?;
-        }
+    .context("daemon did not become ready; see daemon.log")
+}
+async fn setup_gui(owner: &ControlClient, config: Option<PathBuf>) -> Result<()> {
+    let config = config
+        .or_else(|| dirs::config_dir().map(|p| p.join("blobtorrent-gui")))
+        .context("cannot determine GUI configuration directory")?;
+    // An existing choice, including a remote daemon, belongs to the user.
+    if client::configured_endpoint(&config)?.is_none() {
+        let ticket = owner.create_pairing_ticket().await?;
+        client::pair(&config, &ticket).await?;
+        std::fs::write(config.join("local-endpoint"), ticket.addr.id.to_string())?;
     }
     Ok(())
 }

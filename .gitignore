@@ -2,3 +2,4 @@
 /.blobtorrent
 /dist
 /installer-test-logs
+__pycache__/

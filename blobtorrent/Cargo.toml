@@ -34,3 +34,6 @@ blobtorrent-proto = { workspace = true, features = ["client"] }
 [dev-dependencies]
 bao-tree = "0.16"
 tempfile.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+plist = "1"

@@ -5,6 +5,7 @@ import pathlib
 import plistlib
 import shutil
 import sys
+import subprocess
 import tarfile
 import tempfile
 import tomllib
@@ -33,7 +34,8 @@ def package(target: str) -> pathlib.Path:
                 version = tomllib.load(manifest)["workspace"]["package"]["version"]
             contents = bundle / "Blobtorrent.app" / "Contents"
             (contents / "MacOS").mkdir(parents=True)
-            shutil.copy2(bundle / "blobtorrent-gui", contents / "MacOS" / "blobtorrent-gui")
+            for binary in ("blobtorrent", "blobtorrent-background", "blobtorrent-gui", "blobtorrent-tui"):
+                shutil.copy2(binaries / binary, contents / "MacOS" / binary)
             with (contents / "Info.plist").open("wb") as file:
                 plistlib.dump({
                     "CFBundleExecutable": "blobtorrent-gui",
@@ -43,7 +45,12 @@ def package(target: str) -> pathlib.Path:
                     "CFBundleShortVersionString": version,
                     "CFBundleVersion": version,
                     "NSHighResolutionCapable": True,
+                    "LSMinimumSystemVersion": "13.0",
+                    "NSDownloadsFolderUsageDescription": "Share files from Downloads and save downloaded content there.",
+                    "NSDocumentsFolderUsageDescription": "Share files from Documents and save downloaded content there.",
+                    "NSDesktopFolderUsageDescription": "Share files from Desktop and save downloaded content there.",
                 }, file)
+            subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(bundle / "Blobtorrent.app")], check=True)
         archive = dist / (name + (".zip" if windows else ".tar.gz"))
         if windows:
             with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as output:

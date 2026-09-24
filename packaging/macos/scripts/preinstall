@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+if [ "$(id -u)" -eq 0 ]; then
+    echo 'Install Blobtorrent for your own user account, without sudo.' >&2
+    exit 1
+fi
+helper="$HOME/Applications/Blobtorrent.app/Contents/MacOS/blobtorrent-background"
+if [ -x "$helper" ]; then
+    "$helper" remove-agent
+fi

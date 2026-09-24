@@ -46,11 +46,17 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./packaging/windows/smoke.ps1
+      - name: Build per-user macOS installer
+        if: runner.os == 'macOS'
+        run: python packaging/macos/build.py
+      - name: Test macOS install, upgrade, and uninstall
+        if: runner.os == 'macOS'
+        run: python packaging/macos/smoke.py
       - name: Upload installer test logs
-        if: failure() && runner.os == 'Windows'
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installer-test-logs
+          name: installer-test-logs-${{ matrix.target }}
           path: installer-test-logs/*
       - uses: actions/upload-artifact@v4
         with:

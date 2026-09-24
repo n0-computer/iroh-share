@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+if ($env:CI -ne 'true') { throw 'Run this installation test only on an ephemeral CI runner' }
 $root = (Resolve-Path "$PSScriptRoot/../..").Path
 $installer = (Get-ChildItem "$root/dist/*-windows-x64-setup.exe" | Select-Object -First 1).FullName
 $app = "$env:LOCALAPPDATA\Programs\Blobtorrent"

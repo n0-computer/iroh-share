@@ -692,6 +692,7 @@ dependencies = [
  "irpc-iroh",
  "n0-future",
  "n0-mainline",
+ "plist",
  "rand 0.10.3",
  "serde",
  "serde_json",

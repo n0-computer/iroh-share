@@ -573,7 +573,7 @@ async fn daemon(state_dir: &Path, no_announce: bool, print_pairing_ticket: bool)
     }
     let mut actor_task = tokio::spawn(actor.run(shutdown_rx));
     tokio::select! {
-        _ = tokio::signal::ctrl_c() => {},
+        _ = shutdown_signal() => {},
         result = &mut actor_task => { result?; },
     }
     let _ = shutdown_tx.send(true);
@@ -591,6 +591,23 @@ async fn daemon(state_dir: &Path, no_announce: bool, print_pairing_ticket: bool)
     router.shutdown().await?;
     tokio::fs::remove_file(state_dir.join("control.addr")).await?;
     Ok(())
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("install SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = terminate.recv() => {},
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 async fn client(state_dir: &Path, command: CommandLine) -> Result<()> {
