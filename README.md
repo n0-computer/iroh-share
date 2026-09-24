@@ -51,7 +51,11 @@ the four binaries with a per-user `install.sh`. The script explains what it will
 and asks before installing into `~/.local/share/blobtorrent`, linking the programs
 into `~/.local/bin`, and registering a `blobtorrent.service` systemd user service
 that starts the daemon at login. See the plain `README` inside the archive, and
-`packaging/linux/` in this repository. Windows and macOS releases ship installers.
+`packaging/linux/` in this repository. Releases also carry `.deb`, `.rpm` and
+Arch Linux `.pkg.tar.zst` packages built with nfpm from `packaging/linux/nfpm.yaml`. They install the binaries
+to `/usr/bin` and a `blobtorrent.service` systemd user unit that is enabled for every
+account and starts at login; pair the desktop app once with
+`blobtorrent-background --setup-gui`. Windows and macOS releases ship installers.
 
 To install the daemon and either frontend from source:
 

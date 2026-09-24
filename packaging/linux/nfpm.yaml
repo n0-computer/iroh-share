@@ -1,0 +1,62 @@
+# nfpm configuration for the deb, rpm and Arch Linux packages. build-packages.py sets
+# ARCH and VERSION, substitutes ${BINARIES} and runs nfpm once per format.
+name: blobtorrent
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: net
+priority: optional
+maintainer: n0 team <hello@n0.computer>
+vendor: n0-computer
+homepage: https://github.com/n0-computer/blobtorrent
+license: Apache-2.0 OR MIT
+description: |
+  Background service for sharing and downloading iroh blob collections.
+  Ships the daemon and command-line client, a terminal interface and a
+  desktop app. The daemon runs as a per-user systemd service that is
+  enabled for every account and starts at login.
+depends:
+  - glibc >= 2.34
+recommends:
+  - libxkbcommon
+  - libwayland-client
+  - mesa-libEGL
+  - mesa-libGL
+contents:
+  - src: ${BINARIES}/blobtorrent
+    dst: /usr/bin/blobtorrent
+  - src: ${BINARIES}/blobtorrent-background
+    dst: /usr/bin/blobtorrent-background
+  - src: ${BINARIES}/blobtorrent-gui
+    dst: /usr/bin/blobtorrent-gui
+  - src: ${BINARIES}/blobtorrent-tui
+    dst: /usr/bin/blobtorrent-tui
+  - src: packaging/linux/package/blobtorrent.service
+    dst: /usr/lib/systemd/user/blobtorrent.service
+  - src: packaging/linux/package/blobtorrent.desktop
+    dst: /usr/share/applications/blobtorrent.desktop
+  - src: README.md
+    dst: /usr/share/doc/blobtorrent/README.md
+  - src: blobtorrent-proto/UI.md
+    dst: /usr/share/doc/blobtorrent/UI.md
+scripts:
+  postinstall: packaging/linux/package/postinstall.sh
+  preremove: packaging/linux/package/preremove.sh
+archlinux:
+  packager: n0 team <hello@n0.computer>
+overrides:
+  deb:
+    depends:
+      - libc6 (>= 2.34)
+    recommends:
+      - libxkbcommon0
+      - libwayland-client0
+      - libegl1
+      - libgl1
+  archlinux:
+    depends:
+      - glibc>=2.34
+    recommends:
+      - libxkbcommon
+      - wayland
+      - libglvnd

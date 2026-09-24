@@ -60,11 +60,28 @@ jobs:
       - name: Test macOS install, upgrade, and uninstall
         if: runner.os == 'macOS'
         run: python packaging/macos/smoke.py
+      - name: Install nfpm
+        if: runner.os == 'Linux'
+        env:
+          NFPM_VERSION: 2.47.0
+        run: |
+          arch=$(uname -m); [ "$arch" = aarch64 ] && arch=arm64
+          base="https://github.com/goreleaser/nfpm/releases/download/v$NFPM_VERSION"
+          curl -fsSLO "$base/nfpm_${NFPM_VERSION}_Linux_${arch}.tar.gz"
+          curl -fsSL "$base/checksums.txt" | grep " nfpm_${NFPM_VERSION}_Linux_${arch}.tar.gz\$" | sha256sum -c -
+          sudo tar -xzf "nfpm_${NFPM_VERSION}_Linux_${arch}.tar.gz" -C /usr/local/bin nfpm
+          rm "nfpm_${NFPM_VERSION}_Linux_${arch}.tar.gz"
+      - name: Build deb, rpm and Arch Linux packages
+        if: runner.os == 'Linux'
+        run: python packaging/linux/build-packages.py ${{ matrix.target }}
       - name: Test Linux install, upgrade, and uninstall
         if: runner.os == 'Linux'
         run: |
           sudo loginctl enable-linger "$(id -un)"
           python packaging/linux/smoke.py
+      - name: Test deb, rpm and Arch Linux packages
+        if: runner.os == 'Linux'
+        run: python packaging/linux/smoke-packages.py
       - name: Upload installer test logs
         if: failure()
         uses: actions/upload-artifact@v4
