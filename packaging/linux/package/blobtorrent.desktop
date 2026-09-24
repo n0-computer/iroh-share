@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Blobtorrent
+Comment=Share and download iroh blob collections
+Exec=blobtorrent-gui
+Terminal=false
+Categories=Network;FileTransfer;

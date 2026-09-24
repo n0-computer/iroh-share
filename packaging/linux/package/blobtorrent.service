@@ -1,0 +1,14 @@
+[Unit]
+Description=Blobtorrent background daemon
+Documentation=https://github.com/n0-computer/blobtorrent
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/blobtorrent daemon --no-pairing-ticket
+WorkingDirectory=%h
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
