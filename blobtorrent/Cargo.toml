@@ -1,4 +1,5 @@
 [package]
+default-run = "blobtorrent"
 name = "blobtorrent"
 version.workspace = true
 edition.workspace = true

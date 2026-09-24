@@ -1,0 +1,7 @@
+Blobtorrent runs in the background for your Windows account.
+
+Setup installs the desktop app, command-line tools, and background daemon under your local profile. It starts the daemon now and at each login, and connects a new desktop app configuration automatically. No administrator access is required.
+
+The daemon keeps running when you close the desktop app. Use the Start menu's Stop background daemon shortcut to stop it. You can disable automatic startup in Windows Settings > Apps > Startup.
+
+Uninstall stops the daemon and removes the apps and startup entry. Shared/downloaded files, saved state, and client identities are kept.

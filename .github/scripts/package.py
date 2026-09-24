@@ -24,6 +24,8 @@ def package(target: str) -> pathlib.Path:
         bundle.mkdir()
         for binary in ("blobtorrent", "blobtorrent-tui", "blobtorrent-gui"):
             shutil.copy2(binaries / (binary + suffix), bundle / (binary + suffix))
+        if windows:
+            shutil.copy2(binaries / "blobtorrent-background.exe", bundle / "blobtorrent-background.exe")
         shutil.copy2(root / "README.md", bundle / "README.md")
         shutil.copy2(root / "blobtorrent-proto" / "UI.md", bundle / "UI.md")
         if "apple" in target:

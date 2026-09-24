@@ -55,21 +55,36 @@ impl ControlClient {
     }
 
     pub async fn connect(state_dir: &Path) -> Result<Self> {
-        let server = configured_address(state_dir)?;
-        let key = load_or_create_key(&state_dir.join("control-client.key"))?;
-        if let Some(server) = server {
+        if let Some(server) = configured_address(state_dir)? {
+            let key = load_or_create_key(&state_dir.join("control-client.key"))?;
             Self::connect_to(server, key).await
         } else {
-            let addr: EndpointAddr = serde_json::from_slice(&tokio::fs::read(state_dir.join("control.addr")).await.context("daemon is not running: missing control.addr; configure a remote endpoint with --endpoint")?)?;
-            let endpoint = Endpoint::builder(presets::Minimal)
-                .secret_key(key)
-                .bind_addr("127.0.0.1:0")?
-                .bind()
-                .await?;
-            let mut client = Self::from_endpoint(endpoint, addr);
-            client.remote = false;
-            Ok(client)
+            Self::connect_local(state_dir).await
         }
+    }
+    /// Use the local daemon owner's identity, ignoring configured remote servers.
+    /// Intended for local administration and installer setup, not ordinary UI connections.
+    pub async fn connect_local(state_dir: &Path) -> Result<Self> {
+        let addr: EndpointAddr = serde_json::from_slice(
+            &tokio::fs::read(state_dir.join("control.addr"))
+                .await
+                .context("local daemon is not running: missing control.addr")?,
+        )?;
+        let key = load_or_create_key(&state_dir.join("control-client.key"))?;
+        let endpoint = Endpoint::builder(presets::Minimal)
+            .secret_key(key)
+            .bind_addr("127.0.0.1:0")?
+            .bind()
+            .await?;
+        let mut client = Self::from_endpoint(endpoint, addr);
+        client.remote = false;
+        Ok(client)
+    }
+    pub async fn shutdown(&self) -> Result<()> {
+        tokio::time::timeout(Duration::from_secs(10), self.client.rpc(crate::Shutdown {}))
+            .await
+            .context("daemon shutdown request timed out")??
+            .map_err(anyhow::Error::msg)
     }
     pub async fn get_gateway(&self) -> Result<crate::GatewaySnapshot> {
         tokio::time::timeout(

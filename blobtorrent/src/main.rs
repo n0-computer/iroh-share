@@ -35,6 +35,9 @@ enum CommandLine {
         /// Disable public Mainline announcements; direct tickets still work.
         #[arg(long)]
         no_announce: bool,
+        /// Do not print a first-start invitation (for background launchers).
+        #[arg(long)]
+        no_pairing_ticket: bool,
     },
     Share {
         path: PathBuf,
@@ -60,6 +63,8 @@ enum CommandLine {
 
 #[derive(Subcommand)]
 enum ControlCommand {
+    /// Gracefully stop the daemon.
+    Stop,
     /// Print a one-client pairing ticket for the TUI.
     Pair,
     Id,
@@ -161,6 +166,10 @@ impl Actor {
                 }
             };
             match message {
+                ControlMessage::Shutdown(message) => {
+                    let _ = message.tx.send(Ok(())).await;
+                    break;
+                }
                 ControlMessage::GetGateway(message) => {
                     let _ = message.tx.send(Ok(self.gateway.snapshot())).await;
                 }
@@ -447,7 +456,7 @@ async fn send_update(
     )
 }
 
-async fn daemon(state_dir: &Path, no_announce: bool) -> Result<()> {
+async fn daemon(state_dir: &Path, no_announce: bool, print_pairing_ticket: bool) -> Result<()> {
     tokio::fs::create_dir_all(state_dir).await?;
     // Keep this file handle alive until shutdown. The OS releases the lock even
     // after a crash; a second daemon must fail before changing credentials.
@@ -554,7 +563,7 @@ async fn daemon(state_dir: &Path, no_announce: bool) -> Result<()> {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let server_id = actor.endpoint.id();
     println!("blobtorrent endpoint {server_id}");
-    if first_start {
+    if first_start && print_pairing_ticket {
         // Gather relay hints without requiring Internet access for local setup.
         let _ = tokio::time::timeout(Duration::from_secs(5), actor.endpoint.online()).await;
         let ticket = actor
@@ -613,6 +622,7 @@ async fn client(state_dir: &Path, command: CommandLine) -> Result<()> {
     match command {
         CommandLine::Control { command } => match command {
             ControlCommand::Id | ControlCommand::Endpoint => unreachable!(),
+            ControlCommand::Stop => client.shutdown().await?,
             ControlCommand::Pair => println!("{}", client.create_pairing_ticket().await?),
             ControlCommand::Allow { endpoint } => client.allow_control(endpoint).await?,
             ControlCommand::Revoke { endpoint } => client.revoke_control(endpoint).await?,
@@ -674,7 +684,10 @@ async fn main() -> Result<()> {
         None => blobtorrent_proto::client::default_state_dir()?,
     };
     match args.command {
-        CommandLine::Daemon { no_announce } => daemon(&state_dir, no_announce).await,
+        CommandLine::Daemon {
+            no_announce,
+            no_pairing_ticket,
+        } => daemon(&state_dir, no_announce, !no_pairing_ticket).await,
         command => client(&state_dir, command).await,
     }
 }
@@ -896,8 +909,12 @@ mod tests {
             .map_err(anyhow::Error::msg)?
             .is_empty());
         assert_eq!(std::fs::read(source)?, b"hello");
-        shutdown_tx.send(true)?;
-        task.await?;
+        client
+            .rpc(blobtorrent_proto::Shutdown {})
+            .await?
+            .map_err(anyhow::Error::msg)?;
+        tokio::time::timeout(Duration::from_secs(5), task).await??;
+        drop(shutdown_tx);
         control_client.close().await;
         router.shutdown().await?;
         Ok(())

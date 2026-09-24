@@ -155,3 +155,16 @@ a request is pending. Never display a disconnected cache as live state. Persist 
 preferences separately from daemon-owned data and configuration. A frontend may
 omit capabilities it cannot support well; document its own limits instead of
 requiring every frontend to match it.
+
+## Local installation lifecycle
+
+`Shutdown` asks the daemon to stop gracefully; it uses the same endpoint allowlist
+as other control requests. The response acknowledges the request, not completion
+of shutdown. Installer helpers wait for the daemon's state-directory lock to be
+released before replacing binaries or reporting that the daemon is stopped.
+
+Local installer setup can authenticate as the local owner using
+`ControlClient::connect_local`, mint an invitation, and redeem it for a new GUI
+identity. This is an explicit same-user setup operation. Normal GUI connections
+continue using only their own configuration and key. Installer setup must preserve
+an existing configured daemon and must never silently replace a remote connection.

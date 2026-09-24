@@ -57,6 +57,10 @@ pub struct List {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Watch {}
 
+/// Gracefully stop the daemon; restricted to authorized control clients.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Shutdown {}
+
 /// Complete a path using the daemon's filesystem, home and working directory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletePath {
@@ -205,4 +209,6 @@ pub enum ControlProtocol {
     GetGateway(GetGateway),
     #[rpc(tx=oneshot::Sender<RpcResult<GatewaySnapshot>>)]
     SetGateway(SetGateway),
+    #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
+    Shutdown(Shutdown),
 }

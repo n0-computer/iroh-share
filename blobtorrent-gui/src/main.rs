@@ -128,7 +128,11 @@ impl App {
             .map(|e| format!("{e:#}"))
             .unwrap_or_default();
         let pairing = ticket.is_some() || !matches!(configured, Ok(Some(_)));
-        let local_paths = local_paths && ticket.is_none();
+        let installed_local = std::fs::read_to_string(config.join("local-endpoint"))
+            .ok()
+            .and_then(|id| id.trim().parse::<blobtorrent_proto::EndpointId>().ok())
+            .is_some_and(|id| matches!(&configured, Ok(Some(server)) if *server == id));
+        let local_paths = (local_paths || installed_local) && ticket.is_none();
         let mut app = Self {
             runtime,
             config,

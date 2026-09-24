@@ -38,6 +38,20 @@ jobs:
           python-version: "3.12"
       - name: Package binaries and checksums
         run: python .github/scripts/package.py ${{ matrix.target }}
+      - name: Build per-user Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/windows/build.ps1
+      - name: Test Windows install, upgrade, and uninstall
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/windows/smoke.ps1
+      - name: Upload installer test logs
+        if: failure() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-test-logs
+          path: installer-test-logs/*
       - uses: actions/upload-artifact@v4
         with:
           name: blobtorrent-${{ matrix.target }}
