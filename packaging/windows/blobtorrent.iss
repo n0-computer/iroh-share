@@ -40,9 +40,9 @@ Source: "..\..\blobtorrent-proto\UI.md"; DestDir: "{app}"; Flags: ignoreversion
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Blobtorrent"; ValueData: """{app}\blobtorrent-background.exe"""; Flags: uninsdeletevalue
 
 [Icons]
-Name: "{group}\Blobtorrent"; Filename: "{app}\blobtorrent-gui.exe"; WorkingDir: "{userprofile}"
-Name: "{group}\Start background daemon"; Filename: "{app}\blobtorrent-background.exe"; WorkingDir: "{userprofile}"
-Name: "{group}\Stop background daemon"; Filename: "{app}\blobtorrent-background.exe"; Parameters: "stop"; WorkingDir: "{userprofile}"
+Name: "{group}\Blobtorrent"; Filename: "{app}\blobtorrent-gui.exe"; WorkingDir: "{app}"
+Name: "{group}\Start background daemon"; Filename: "{app}\blobtorrent-background.exe"; WorkingDir: "{app}"
+Name: "{group}\Stop background daemon"; Filename: "{app}\blobtorrent-background.exe"; Parameters: "stop"; WorkingDir: "{app}"
 Name: "{group}\Uninstall Blobtorrent"; Filename: "{uninstallexe}"
 
 [Run]

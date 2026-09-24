@@ -31,6 +31,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: release-${{ matrix.target }}
+          cache-on-failure: true
       - name: Build all binaries
         run: cargo build --release --locked --workspace --target ${{ matrix.target }}
       - uses: actions/setup-python@v5
