@@ -35,7 +35,7 @@ iroh-share-proto = { workspace = true, features = ["client"] }
 
 [dev-dependencies]
 pkarr = { version = "3.10", default-features = false, features = ["signed_packet"] }
-udp-addr-index = { git = "https://github.com/n0-computer/iroh-content-discovery.git", rev = "73d4d71927b6c37fb9344bddd39e519955cfde27" }
+udp-addr-index = { git = "https://github.com/n0-computer/iroh-content-discovery.git", rev = "9a40d29d3bd961657a812bd99b14a723ecf56a05" }
 bao-tree = "0.16"
 tempfile.workspace = true
 
