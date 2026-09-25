@@ -61,7 +61,7 @@ jobs:
           path: installer-test-logs/*
       - uses: actions/upload-artifact@v4
         with:
-          name: blobtorrent-${{ matrix.target }}
+          name: iroh-share-${{ matrix.target }}
           path: dist/*
           if-no-files-found: error
 

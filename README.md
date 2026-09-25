@@ -1,4 +1,28 @@
-# blobtorrent
+# iroh-share
+
+## Publishing your content
+
+The GUI's Data pane supports local file/folder drops and **Import ticket**
+for publishing to a remote daemon. Give content an optional name for a stable
+pkarr URL. Content names are managed alongside the data; standalone URL names and
+ordinary downloads are in collapsed sections.
+
+For an existing item, **Update from ticket** imports a new version while retaining
+its names. A named local directory also offers **Refresh directory**. Keep the
+sendme sender running until a ticket import completes. Paste a ticket or drop a
+`.ticket`/`.sendme` file; dropping a local folder requires the same-filesystem setting.
+
+Ticket imports are exported into `Downloads/Iroh Share` on the daemon's machine,
+separate from private daemon state and the blob store. Each version has its own
+folder, and previous files are kept. Override the default with:
+
+```sh
+iroh-share daemon --import-dir /path/to/published-content
+```
+
+The GUI shows the configured import directory and each item's exported path.
+See [the publishing UX plan](iroh-share-proto/PUBLISHING-UX.md) and
+[UI capabilities](iroh-share-proto/UI.md) for protocol details.
 
 A background service for sharing and downloading iroh blob collections. The daemon
 owns one iroh endpoint and one filesystem blob store shared by all transfers. Its
@@ -7,16 +31,16 @@ removing jobs.
 
 The Cargo workspace has four crates:
 
-- `blobtorrent-proto`: typed iRPC messages and state snapshots, with optional
+- `iroh-share-proto`: typed iRPC messages and state snapshots, with optional
   `client` helpers for native clients.
-- `blobtorrent`: daemon and command-line client in one binary.
-- `blobtorrent-tui`: Ratatui terminal interface using the same control protocol.
-- `blobtorrent-gui`: egui desktop interface using the same control protocol.
+- `iroh-share`: daemon and command-line client in one binary.
+- `iroh-share-tui`: Ratatui terminal interface using the same control protocol.
+- `iroh-share-gui`: egui desktop interface using the same control protocol.
 
 ```sh
 cargo run -- --state-dir /path/to/state daemon
 cargo run -- --state-dir /path/to/state share /path/to/directory
-cargo run -- --state-dir /path/to/state download '<blob ticket>' /path/to/target
+cargo run -- --state-dir /path/to/state download 'https://<z32-hash>.blake3.net/' /path/to/target
 cargo run -- --state-dir /path/to/state list
 cargo run -- --state-dir /path/to/state watch
 cargo run -- --state-dir /path/to/state remove 0
@@ -27,15 +51,15 @@ Start the daemon, then open the desktop GUI:
 ```sh
 cargo run -- daemon
 # Paste the ticket printed by the daemon when prompted.
-cargo run -p blobtorrent-gui
+cargo run -p iroh-share-gui
 ```
 
-For the terminal interface, use `cargo run -p blobtorrent-tui`.
+For the terminal interface, use `cargo run -p iroh-share-tui`.
 
 The TUI shows live states and progress. Seeding details start with the collection's
 `https://<z32-hash>.blake3.net/` URL, followed by the hash and ticket; failed jobs
 show their error. Use Up/Down (or j/k) to select an item, s to share a path,
-d to enter a ticket and download target, x to remove the selected item (y confirms),
+d to enter a URL, hash, or ticket and download target, x to remove the selected item (y confirms),
 PageUp/PageDown to scroll details, and q or Ctrl-C to quit. Escape cancels a prompt.
 In path prompts, Tab completes filenames and directories; repeat Tab to cycle
 matches or Shift-Tab to cycle backwards. A unique directory completion adds a
@@ -49,16 +73,16 @@ with a fresh snapshot; commands are disabled until that snapshot is complete.
 To install the daemon and either frontend:
 
 ```sh
-cargo install --path blobtorrent
-cargo install --path blobtorrent-gui
-cargo install --path blobtorrent-tui
+cargo install --path iroh-share
+cargo install --path iroh-share-gui
+cargo install --path iroh-share-tui
 ```
 
 Without `--state-dir`, the daemon and CLI use this per-user location:
 
-- Linux: `$XDG_STATE_HOME/blobtorrent`, or `~/.local/state/blobtorrent`.
-- macOS: `~/Library/Application Support/blobtorrent`.
-- Windows: `%LOCALAPPDATA%\blobtorrent`.
+- Linux: `$XDG_STATE_HOME/iroh-share`, or `~/.local/state/iroh-share`.
+- macOS: `~/Library/Application Support/iroh-share`.
+- Windows: `%LOCALAPPDATA%\iroh-share`.
 
 `--state-dir` overrides this location.
 
@@ -67,15 +91,16 @@ At startup, the daemon logs endpoint-indexer `host:port` advertisements from the
 Mainline rendezvous hash at `info` level, deduplicating results over a lookup of up
 to 30 seconds. These are advertised candidates, not verified live indexers. Empty,
 failed, or timed-out lookups produce warnings. Logs go to stderr; set `RUST_LOG`
-to change the default `warn,blobtorrent=info` filter. `--no-announce` skips discovery.
+to change the default `warn,iroh_share=info` filter. `--no-announce` skips discovery.
 
 Normally, a shared Mainline publisher announces completed collections and retries
 on discovery failures. Direct ticket transfers work independently of Mainline.
 The announcement library is pinned to a Git revision in `Cargo.toml`.
 
-The iRPC protocol lives in `blobtorrent-proto/src/lib.rs`. Hashes use `iroh_blobs::Hash`, and tickets
-use `BlobTicket`. Ticket strings are parsed at the CLI boundary. The control server
-shares the blob iroh endpoint on the `/blobtorrent/control/1` ALPN. It checks the
+The iRPC protocol lives in `iroh-share-proto/src/lib.rs`. Hashes use `iroh_blobs::Hash`, and tickets
+use `BlobTicket`. Download inputs are parsed by clients using `DownloadSource::from_str`
+from the protocol crate. The control server
+shares the blob iroh endpoint on the `/iroh-share/control/5` ALPN. It checks the
 authenticated remote endpoint ID against a persistent allowlist before dispatching
 RPC requests. Blob connections are public.
 
@@ -83,10 +108,10 @@ Each `Job` contains an ID, its original request (`JobKind`), and a `JobState`:
 
 - `Queued`: accepted and waiting to start.
 - `Importing { progress }`: known byte and file totals for source files.
-- `Downloading { source, progress }`: source ticket and byte progress; total bytes
+- `Downloading { source, progress }`: hash, provider addresses, discovery policy, and byte progress; total bytes
   may be unknown and include collection metadata.
 - `Exporting { root_hash, progress }`: collection hash and payload byte/file counts.
-- `Seeding { ticket }`: a required ticket containing the root hash (`ticket.hash()`).
+- `Seeding { ticket, active_uploads }`: a required ticket containing the root hash (`ticket.hash()`).
 - `Failed { error }`: a `JobError` containing the failure message.
 
 State-specific fields live inside these variants. There is no separate phase or
@@ -120,9 +145,25 @@ Removing a job cancels its task and stops renewing its announcement, without
 removing source or exported files. Data already in the shared store may still be
 served by hash; removal is not a revocation or immediate garbage collection.
 
+Seeding snapshots include `active_uploads`, the number of active requests for the
+collection root. Clients can show this beside Seeding. Counts reset on restart
+and drop when requests complete, fail, or disconnect. Individual child-blob
+requests are not attributed to collections; counts describe requests, not people.
+
 Names, signing keys, shares, and download requests are persistent, regardless of their current transfer state. Entries retain their IDs across restarts. Imports restart from scratch; incomplete downloads reuse local blob data; interrupted exports rerun; completed downloads resume seeding without export. The daemon endpoint identity is persistent. Names attached to removed data wait until retargeted.
-Downloads currently use the provider in the ticket and do not schedule parallel
-ranges of a single blob across multiple providers.
+Downloads accept collection root URLs (`https://<z32-hash>.blake3.net/`), bare
+z32 or hexadecimal BLAKE3 hashes, and collection tickets. URLs with subpaths,
+queries, or fragments are rejected; downloads export whole collections.
+Clients parse the input into `DownloadSource` and send one `Download` RPC.
+The source contains a BLAKE3 hash, provider addresses (if known), and a discovery
+policy. `Disabled` restricts downloads to supplied providers; `Mainline` permits
+finding additional peers if the supplied providers cannot finish. Downloads
+retain verified partial data between providers. Discovery has a 60-second
+deadline. URL/hash inputs enable discovery. Sendme-compatible collection tickets
+preserve their address hints and disable discovery by default; use `--discover`
+in the CLI or “Also discover providers for tickets” in the GUI to enable it.
+Complete local collections can be exported without discovery. Transfers do not
+schedule parallel ranges of a single blob across multiple providers.
 
 ```sh
 cargo test --workspace
@@ -131,11 +172,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ## Gateway settings
 
-Press **,** or **F2** to open Settings, or use Tab to cycle through Data, Names,
+Press **,** or **F2** to open Settings, or use Tab to cycle through Data, content names,
 and Settings. The page configures the gateway embedded in the daemon:
 
 - **Gateway enabled:** start automatically and keep running with the daemon.
-- **HTTP listen address:** a loopback address, default `127.0.0.1:8080`.
+- **HTTP listen address:** a loopback address, default `127.0.0.1:45475`.
 - **Index server:** an optional IPv4 `host:port`; empty uses Mainline rendezvous discovery.
 
 Use Up/Down to select, Space to toggle, and Enter to edit a field. Ctrl-U clears
@@ -143,7 +184,7 @@ an edit. Press **s** to save and apply, **r** to discard unsaved changes, or Esc
 to return. Applying settings restarts the gateway. Its state is shown as Disabled,
 Starting, Running, or Failed; failures retry every 30 seconds. Settings are saved
 atomically in `STATE_DIR/gateway.json` and restored on daemon startup. The gateway
-is enabled by default on `127.0.0.1:8080`. An explicitly saved disabled setting is preserved. Closing the TUI does not stop it.
+is enabled by default on `127.0.0.1:45475`. An explicitly saved disabled setting is preserved. Closing the TUI does not stop it.
 
 The daemon embeds `iroh-local-gateway` as a library, with its own iroh endpoint and
 Mainline resolver. It streams the content-addressed web through normal network
@@ -163,11 +204,11 @@ Names provide a stable `https://<public-key>.pkarr.net/` URL pointing to an HTTP
 URL or an existing job's current `blake3.net` URL:
 
 ```sh
-blobtorrent names create website --url 'https://example.com/path?query=value'
-blobtorrent names create shared --job 0
-blobtorrent names list
-blobtorrent names update website --url 'https://example.org/new-path'
-blobtorrent names remove website
+iroh-share names create website --url 'https://example.com/path?query=value'
+iroh-share names create shared --job 0
+iroh-share names list
+iroh-share names update website --url 'https://example.org/new-path'
+iroh-share names remove website
 ```
 
 Updating a name preserves its key and public URL. Job targets follow shared files
@@ -176,9 +217,13 @@ share imports, its last record continues to be published. Old snapshots are not
 archived. A new name waits for its target job to finish importing or downloading.
 Removing a job pauses its names and prevents automatic restart of that share.
 
-In the TUI, Tab cycles through Data, Names, and Settings. Press n on a selected item to name
-it; in Names, n creates a name, e edits its target, and x removes it after
-confirmation. Targets accept a full HTTP(S) URL, `data:<id>`, or `job:<id>`.
+In the TUI, Tab cycles through Data, its content-name view, and Settings. Press n
+on selected data to name it. In the content-name view, n creates a name, e edits
+its target, and x removes it after confirmation. Retarget linked names by selecting
+a path with Up/Down; in a URL prompt, Ctrl+D switches to data selection. N expands
+standalone URL names. D expands downloads, where d opens the download prompt.
+Use i for a new sendme ticket import, u to update selected data from a ticket,
+and r to refresh a named local directory.
 
 The daemon signs DNS records and republishes them on Mainline every ten minutes,
 retrying failures after thirty seconds. The Names view and Watch expose publication
@@ -197,8 +242,8 @@ URLs are rejected. Credentials in URLs are not supported.
 ### Copying and opening URLs
 
 Press **c** to copy the selected URL or **o** to open it in your default browser.
-Data uses its `blake3.net` URL once seeding; Names uses the stable `pkarr.net`
-URL. The heading also provides an **Open selected URL** terminal hyperlink
+Named data uses its stable `pkarr.net` URL; unnamed data uses its `blake3.net`
+URL once seeding. The content-name and standalone-name views use `pkarr.net` URLs. The heading also provides an **Open selected URL** terminal hyperlink
 (usually Ctrl-click or Cmd-click, depending on the terminal).
 
 Local copying uses the desktop clipboard. Over SSH, or if the desktop clipboard
@@ -228,13 +273,13 @@ so restart retries that work. Progress counters are reconstructed rather than
 written on every update. Persistent blob tags retain downloaded data across restart.
 
 Only recovery in Exporting reruns export. With published `iroh-blobs`, the application
-cannot inspect external reference paths, so blobtorrent hashes existing target files
+cannot inspect external reference paths, so iroh-share hashes existing target files
 and skips them when they match the expected blob. Different files are rejected.
 This adds a verification read when recovering an interrupted export. Completed
 seeders do not run export again. Keep downloaded files unchanged while seeding,
 as the store references them.
 
-Blobtorrent uses the published `iroh-blobs` crate.
+Iroh Share uses the published `iroh-blobs` crate.
 
 ### Control identities and remote TUI setup
 
@@ -243,30 +288,30 @@ The daemon stores its stable identity in `STATE_DIR/daemon.key`. The CLI uses
 The TUI has its own identity and configuration and never reads the daemon's state
 directory. Its default directory is selected using `dirs::config_dir()`:
 
-- Linux: `$XDG_CONFIG_HOME/blobtorrent-tui`, or `~/.config/blobtorrent-tui`.
-- macOS: `~/Library/Application Support/blobtorrent-tui`.
-- Windows: `%APPDATA%\blobtorrent-tui`.
+- Linux: `$XDG_CONFIG_HOME/iroh-share-tui`, or `~/.config/iroh-share-tui`.
+- macOS: `~/Library/Application Support/iroh-share-tui`.
+- Windows: `%APPDATA%\iroh-share-tui`.
 
 Use `--config-dir` to override it. It contains `control-client.key` and `client.json`
 (the saved daemon identity and address hints). Keys are created atomically with mode
 0600 on Unix. The pairing secret is not saved by the TUI.
 
-On its first startup, `blobtorrent daemon` prints a ready-to-run command:
+On its first startup, `iroh-share daemon` prints a ready-to-run command:
 
 ```sh
-blobtorrent-tui '<pairing-ticket>'
+iroh-share-tui '<pairing-ticket>'
 ```
 
 The ticket contains the daemon identity, address hints, and a random one-time secret.
-It uses `iroh-tickets` with the `blobtorrent` prefix and a versioned postcard payload.
-You can also launch `blobtorrent-tui` without arguments and paste the ticket at its
+It uses `iroh-tickets` with the `iroh-share` prefix and a versioned postcard payload.
+You can also launch `iroh-share-tui` without arguments and paste the ticket at its
 first-run prompt. The TUI creates its own persistent identity, redeems the ticket,
 saves the connection, and opens the interface without another setup step.
-Subsequent launches only need `blobtorrent-tui`.
+Subsequent launches only need `iroh-share-tui`.
 To create additional tickets while the daemon is running:
 
 ```sh
-blobtorrent control pair
+iroh-share control pair
 ```
 
 Multiple tickets can be outstanding at once. Each authorizes one authenticated
@@ -275,14 +320,14 @@ revoked access. Tickets are valid until redeemed or the daemon stops. Paired cli
 authorizations persist across daemon restarts. Anyone holding an unused ticket can
 claim its full control access.
 
-Pairing uses `/blobtorrent/pair/1` on the same iroh endpoint. It exposes only enrollment;
+Pairing uses `/iroh-share/pair/1` on the same iroh endpoint. It exposes only enrollment;
 normal control requests use the endpoint allowlist. Authorization is saved before
 success is reported. The disconnected TUI displays ticket setup instructions.
 Path completion and resolution use the daemon’s filesystem, so the TUI can run on
 another machine. `--endpoint <daemon-id>` selects an explicitly authorized daemon
 without redeeming a ticket; `--print-id` prints the TUI's identity.
 
-`blobtorrent control list` lists allowed IDs; `blobtorrent control revoke <id>`
+`iroh-share control list` lists allowed IDs; `iroh-share control revoke <id>`
 removes one and closes its active control connections, including Watch streams.
 The implicit local owner cannot be revoked through RPC. Allowed clients currently
 have full control, including allowlist management. Grants are stored in
@@ -298,20 +343,22 @@ The daemon writes `control.addr` for local CLI discovery.
 
 ## Desktop GUI
 
-Run `cargo run -p blobtorrent-gui --release`. Paste the daemon's one-time ticket
+Run `cargo run -p iroh-share-gui --release`. Paste the daemon's one-time ticket
 into the connection screen, or pass it as a positional argument. The GUI keeps
 its own identity and saved daemon address in the platform configuration directory
-under `blobtorrent-gui`; `--config-dir` overrides it.
+under `iroh-share-gui`; `--config-dir` overrides it.
 
-Data, Names, and Settings provide sharing, downloads, pkarr management, and gateway
-configuration. Content links can be opened or copied; blob tickets are secondary.
+Data is the publishing screen, with content-linked names alongside it. Standalone
+URL names and ordinary downloads are collapsed sections. Settings contains gateway
+configuration. Public links and sendme tickets have copy actions.
 Use **Complete** for paths on the daemon. When both apps share a filesystem,
 enable **The daemon is on this computer** in Settings to choose folders, share
 files/folders by dropping them into the window, and open seeded paths in the
 system file manager. Closing the GUI leaves the daemon and gateway running.
 
 Frontend capabilities and protocol behavior are described in
-[the UI capability guide](blobtorrent-proto/UI.md). Frontends can evolve independently.
+[the UI capability guide](iroh-share-proto/UI.md) and
+[shared UX foundations](iroh-share-proto/UX.md). Layouts may differ; workflows agree.
 
 ## CI and binary releases
 
@@ -322,13 +369,13 @@ produce downloadable workflow artifacts without creating a release.
 
 Pushing a `v*` tag publishes the archives and SHA-256 checksums as a GitHub Release
 once both builds succeed. Windows uses ZIP; macOS uses tar.gz and also
-includes a `Blobtorrent.app` bundle. These builds are unsigned and not notarized;
+includes a `Iroh Share.app` bundle. These builds are unsigned and not notarized;
 OS download protections may require explicit approval to run them.
 
 ## Windows per-user installer
 
-Run `blobtorrent-<version>-windows-x64-setup.exe` from the release. Setup installs
-under `%LOCALAPPDATA%\Programs\Blobtorrent`, adds Start menu shortcuts, and starts
+Run `iroh-share-<version>-windows-x64-setup.exe` from the release. Setup installs
+under `%LOCALAPPDATA%\Programs\Iroh Share`, adds Start menu shortcuts, and starts
 the daemon in the background for the current account. It registers the daemon to
 start at login; administrator access is not required. This is a per-user login
 process, not a Windows system service, and does not run before login.
@@ -340,9 +387,9 @@ installer-paired daemon. Closing the GUI leaves the daemon running.
 
 The Start menu includes **Start background daemon** and **Stop background daemon**.
 Windows **Settings → Apps → Startup** controls whether it starts at login. The
-helper `blobtorrent-background.exe --setup-gui` retries initial setup;
-`blobtorrent-background.exe stop` stops the local daemon gracefully. Logs are
-`%LOCALAPPDATA%\blobtorrent\daemon.log` and `launcher.log`. Daemon output rotates
+helper `iroh-share-background.exe --setup-gui` retries initial setup;
+`iroh-share-background.exe stop` stops the local daemon gracefully. Logs are
+`%LOCALAPPDATA%\iroh-share\daemon.log` and `launcher.log`. Daemon output rotates
 to `daemon.previous.log` on startup once the current log exceeds 5 MiB.
 
 Upgrades stop the daemon before replacing its binaries and start it afterwards.
@@ -357,7 +404,7 @@ user data on a Windows runner. Portable ZIP archives remain available.
 ## macOS per-user installer
 
 On Apple Silicon with macOS 13 or later, open
-`blobtorrent-<version>-macos-arm64.pkg`. It installs `Blobtorrent.app` in
+`iroh-share-<version>-macos-arm64.pkg`. It installs `Iroh Share.app` in
 `~/Applications`, registers a per-user LaunchAgent, starts the daemon, and pairs a
 new GUI configuration. Install for your own account, without `sudo`. Existing GUI
 connections are preserved.
@@ -365,8 +412,8 @@ connections are preserved.
 The daemon starts at login and stays running after the GUI closes. launchd
 restarts failed daemon exits; an explicit graceful stop leaves it stopped until
 login or restart. The daemon handles SIGTERM for logout and service shutdown.
-The LaunchAgent is `~/Library/LaunchAgents/computer.n0.blobtorrent.plist`; state
-and logs live in `~/Library/Application Support/blobtorrent`.
+The LaunchAgent is `~/Library/LaunchAgents/computer.n0.iroh-share.plist`; state
+and logs live in `~/Library/Application Support/iroh-share`.
 
 macOS can ask you to approve background activity and access to protected folders.
 Installation does not bypass Downloads/Documents/Desktop privacy permissions.
@@ -374,6 +421,40 @@ The app has an ad-hoc signature for bundle integrity; the package is not Develop
 ID signed or notarized, so this build still requires explicit approval under
 macOS download protections.
 
-To remove it, close the GUI and run `~/Applications/Uninstall Blobtorrent.command`.
+To remove it, close the GUI and run `~/Applications/Uninstall Iroh Share.command`.
 It stops and unregisters the LaunchAgent, then removes the app and uninstaller.
 Saved state, GUI identity/settings, and shared/downloaded files are preserved.
+
+Directory shares expose their contents at the collection root by default. Use
+`iroh-share share --include-directory-name /path/to/directory` to include the
+directory basename. The GUI has an Include directory name checkbox; Ctrl+R
+toggles it in the TUI share prompt. The choice persists across refreshes and
+restarts. Existing saved shares retain their layout.
+
+Export all pkarr names, including those attached to content, from the Names
+panel's **Export all pkarr names…** action, or run:
+
+```sh
+iroh-share names export pkarr-names.zip
+```
+
+The ZIP is saved on the client computer. Each public-key directory contains
+`public-key.txt` (z-base-32), `private-key.hex` (32-byte Ed25519 signing seed),
+and `record.pkarr` (the current signed packet, if one exists). Aliases are not
+included. `record.pkarr` uses pkarr's `SignedPacket::as_bytes` format. The ZIP
+contains unencrypted private keys; export creates a new file without overwriting
+an existing file, with owner-only permissions on Unix.
+
+The Names panel also provides an advanced multiline DNS editor. Its default is
+an HTTPS alias record:
+
+```dns
+@ 300 IN HTTPS 0 example.com.
+```
+
+Replace or add records using one `owner TTL IN TYPE value` per line, for example
+`@ 300 IN A 192.0.2.1` or `@ 300 IN TXT "hello"`. The total DNS packet must fit
+within 1000 bytes. Content-bound names generate their records automatically.
+
+The bundled gateway resolves the apex HTTPS record. URI-only records, including
+full-URL redirects with a path or query, are not supported by this gateway.

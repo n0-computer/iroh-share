@@ -17,30 +17,30 @@ def package(target: str) -> pathlib.Path:
     binaries = root / "target" / target / "release"
     dist = root / "dist"
     dist.mkdir(exist_ok=True)
-    name = f"blobtorrent-{target}"
+    name = f"iroh-share-{target}"
     windows = "windows" in target
     suffix = ".exe" if windows else ""
     with tempfile.TemporaryDirectory() as temporary:
         bundle = pathlib.Path(temporary) / name
         bundle.mkdir()
-        for binary in ("blobtorrent", "blobtorrent-tui", "blobtorrent-gui"):
+        for binary in ("iroh-share", "iroh-share-tui", "iroh-share-gui"):
             shutil.copy2(binaries / (binary + suffix), bundle / (binary + suffix))
         if windows:
-            shutil.copy2(binaries / "blobtorrent-background.exe", bundle / "blobtorrent-background.exe")
+            shutil.copy2(binaries / "iroh-share-background.exe", bundle / "iroh-share-background.exe")
         shutil.copy2(root / "README.md", bundle / "README.md")
-        shutil.copy2(root / "blobtorrent-proto" / "UI.md", bundle / "UI.md")
+        shutil.copy2(root / "iroh-share-proto" / "UI.md", bundle / "UI.md")
         if "apple" in target:
             with (root / "Cargo.toml").open("rb") as manifest:
                 version = tomllib.load(manifest)["workspace"]["package"]["version"]
-            contents = bundle / "Blobtorrent.app" / "Contents"
+            contents = bundle / "Iroh Share.app" / "Contents"
             (contents / "MacOS").mkdir(parents=True)
-            for binary in ("blobtorrent", "blobtorrent-background", "blobtorrent-gui", "blobtorrent-tui"):
+            for binary in ("iroh-share", "iroh-share-background", "iroh-share-gui", "iroh-share-tui"):
                 shutil.copy2(binaries / binary, contents / "MacOS" / binary)
             with (contents / "Info.plist").open("wb") as file:
                 plistlib.dump({
-                    "CFBundleExecutable": "blobtorrent-gui",
-                    "CFBundleIdentifier": "computer.n0.blobtorrent",
-                    "CFBundleName": "Blobtorrent",
+                    "CFBundleExecutable": "iroh-share-gui",
+                    "CFBundleIdentifier": "computer.n0.iroh-share",
+                    "CFBundleName": "Iroh Share",
                     "CFBundlePackageType": "APPL",
                     "CFBundleShortVersionString": version,
                     "CFBundleVersion": version,
@@ -50,7 +50,7 @@ def package(target: str) -> pathlib.Path:
                     "NSDocumentsFolderUsageDescription": "Share files from Documents and save downloaded content there.",
                     "NSDesktopFolderUsageDescription": "Share files from Desktop and save downloaded content there.",
                 }, file)
-            subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(bundle / "Blobtorrent.app")], check=True)
+            subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(bundle / "Iroh Share.app")], check=True)
         archive = dist / (name + (".zip" if windows else ".tar.gz"))
         if windows:
             with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as output:

@@ -8,8 +8,8 @@ if (!(Test-Path $compiler)) {
     if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
 }
 if (!(Test-Path $compiler)) { throw 'Inno Setup compiler not found' }
-& $compiler "/DAppVersion=$version" "/DBuildDir=$root\target\x86_64-pc-windows-msvc\release" "$PSScriptRoot\blobtorrent.iss"
+& $compiler "/DAppVersion=$version" "/DBuildDir=$root\target\x86_64-pc-windows-msvc\release" "$PSScriptRoot\iroh-share.iss"
 if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed' }
-$installer = Get-Item "$root/dist/blobtorrent-$version-windows-x64-setup.exe"
+$installer = Get-Item "$root/dist/iroh-share-$version-windows-x64-setup.exe"
 $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
 Set-Content -Path "$($installer.FullName).sha256" -Value "$hash  $($installer.Name)" -Encoding ascii

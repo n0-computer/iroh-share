@@ -1,0 +1,23 @@
+[package]
+name = "iroh-share-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+arboard = { version = "3", default-features = false }
+webbrowser = { version = "1", features = ["hardened"] }
+base64 = "0.22"
+z32.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+crossterm.workspace = true
+n0-future.workspace = true
+ratatui.workspace = true
+iroh-share-proto = { workspace = true, features = ["client"] }
+
+dirs.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
