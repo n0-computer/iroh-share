@@ -25,14 +25,15 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          key: release-${{ matrix.target }}
-          cache-on-failure: true
+      # No build cache here on purpose: this job produces the binaries and
+      # installers users download, and a cache entry is an input to that
+      # build. Tag builds are rare enough to pay the from-scratch cost.
       - name: Build all binaries
         run: cargo build --release --locked --workspace --target ${{ matrix.target }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
