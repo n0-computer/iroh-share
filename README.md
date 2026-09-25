@@ -78,6 +78,9 @@ cargo install --path iroh-share-gui
 cargo install --path iroh-share-tui
 ```
 
+For a Linux user service that starts automatically, see the
+[systemd example](packaging/systemd/README.md).
+
 Without `--state-dir`, the daemon and CLI use this per-user location:
 
 - Linux: `$XDG_STATE_HOME/iroh-share`, or `~/.local/state/iroh-share`.
