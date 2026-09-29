@@ -149,7 +149,7 @@ impl Page {
                 self.draft
                     .index_server
                     .map(|v| v.to_string())
-                    .unwrap_or_else(|| "automatic (Mainline rendezvous)".into())
+                    .unwrap_or_else(|| "automatic (n0 list)".into())
             ),
             "Save and apply / retry".into(),
         ];

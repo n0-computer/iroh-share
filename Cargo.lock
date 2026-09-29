@@ -3068,9 +3068,8 @@ dependencies = [
 [[package]]
 name = "iroh-local-gateway"
 version = "0.1.0"
-source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=9a40d29d3bd961657a812bd99b14a723ecf56a05#9a40d29d3bd961657a812bd99b14a723ecf56a05"
+source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=62b399fa39c710b6f3981273dc4a4153c6ac4811#62b399fa39c710b6f3981273dc4a4153c6ac4811"
 dependencies = [
- "anyhow",
  "async-stream",
  "axum",
  "bao-tree",
@@ -3078,35 +3077,40 @@ dependencies = [
  "bytes",
  "clap",
  "data-encoding",
+ "dirs",
  "iroh",
  "iroh-blobs",
  "iroh-mainline-endpoint-discovery",
  "lru 0.18.4",
  "mime_classifier",
  "mime_guess",
+ "n0-error",
  "n0-future",
  "n0-mainline",
  "percent-encoding",
+ "plist",
  "postcard",
  "rand 0.10.3",
+ "serde_json",
  "simple-dns 0.12.0",
  "tokio",
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "udp-addr-index-proto",
+ "windows-sys 0.61.2",
  "z32",
 ]
 
 [[package]]
 name = "iroh-mainline-endpoint-discovery"
 version = "0.1.0"
-source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=9a40d29d3bd961657a812bd99b14a723ecf56a05#9a40d29d3bd961657a812bd99b14a723ecf56a05"
+source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=62b399fa39c710b6f3981273dc4a4153c6ac4811#62b399fa39c710b6f3981273dc4a4153c6ac4811"
 dependencies = [
  "async-stream",
  "blake3",
  "data-encoding",
  "iroh-base",
+ "lru 0.18.4",
  "n0-error",
  "n0-future",
  "n0-mainline",
@@ -3831,8 +3835,9 @@ dependencies = [
 
 [[package]]
 name = "n0-mainline"
-version = "0.6.0"
-source = "git+https://github.com/n0-computer/n0-mainline.git?rev=1c0128550a721326ea183e8ef05c776af569f56f#1c0128550a721326ea183e8ef05c776af569f56f"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f64972176bd209d1ebe98310743614e19728a33a4b288ae8147cca9f0b8c7463"
 dependencies = [
  "crc",
  "dyn-clone",
@@ -6642,11 +6647,11 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 [[package]]
 name = "udp-addr-index"
 version = "0.1.0"
-source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=9a40d29d3bd961657a812bd99b14a723ecf56a05#9a40d29d3bd961657a812bd99b14a723ecf56a05"
+source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=62b399fa39c710b6f3981273dc4a4153c6ac4811#62b399fa39c710b6f3981273dc4a4153c6ac4811"
 dependencies = [
- "anyhow",
  "blake3",
  "iroh-metrics",
+ "n0-error",
  "n0-mainline",
  "postcard",
  "rand 0.10.3",
@@ -6658,7 +6663,7 @@ dependencies = [
 [[package]]
 name = "udp-addr-index-proto"
 version = "0.1.0"
-source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=9a40d29d3bd961657a812bd99b14a723ecf56a05#9a40d29d3bd961657a812bd99b14a723ecf56a05"
+source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=62b399fa39c710b6f3981273dc4a4153c6ac4811#62b399fa39c710b6f3981273dc4a4153c6ac4811"
 dependencies = [
  "postcard",
  "serde",

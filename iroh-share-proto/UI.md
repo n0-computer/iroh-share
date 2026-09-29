@@ -180,7 +180,7 @@ and targets and republishes records independently of any UI connection.
 `GetGateway` returns a `GatewaySnapshot`; `SetGateway { config }` persists desired
 configuration and restarts or stops the gateway. Watch provides runtime updates.
 `GatewayConfig` contains `enabled`, a loopback HTTP listen address, and an optional
-IPv4 index server override. No override means Mainline rendezvous discovery.
+IPv4 index server override. No override means the index servers listed by n0.
 
 Without saved settings, the gateway starts enabled on `127.0.0.1:45475`. An explicitly
 saved disabled setting is preserved.
