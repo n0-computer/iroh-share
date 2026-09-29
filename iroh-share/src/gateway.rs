@@ -231,7 +231,7 @@ async fn serve(
         });
         tokio::pin!(serve);
         tokio::select! {
-            result = &mut serve => result,
+            result = &mut serve => Ok(result?),
             _ = wait_shutdown(&mut shutdown) => {
                 let _ = tokio::time::timeout(Duration::from_secs(2), &mut serve).await;
                 Ok(())

@@ -17,9 +17,7 @@ use iroh_blobs::{
     ticket::BlobTicket,
     BlobFormat, Hash,
 };
-use iroh_mainline_endpoint_discovery::{
-    infohash_from_blake3, AddrIndex, DiscoveryConfig, Publisher, Resolver,
-};
+use iroh_mainline_endpoint_discovery::{infohash_from_blake3, AddrIndex, Publisher, Resolver};
 use iroh_share_proto::{
     DiscoveryMode, DownloadProgress, DownloadSource, ExportProgress, ImportProgress, Job, JobError,
     JobKind, JobState,
@@ -603,53 +601,12 @@ pub async fn announce(dht: Dht, secret: SecretKey, mut hashes: watch::Receiver<H
     }
 }
 
-/// Report rendezvous advertisements, which are candidates rather than proof of
-/// indexer availability. Keep the listing bounded and independent of transfers.
-async fn log_rendezvous_indexers(dht: &Dht) {
-    let Some(hash) = DiscoveryConfig::default().rendezvous_hash else {
-        return;
-    };
-    let infohash = Id::from(hash);
-    tracing::info!(%infohash, "Looking up endpoint indexers via Mainline rendezvous");
-    let mut seen = HashSet::new();
-    let lookup = async {
-        let mut peers = dht.get_peers(infohash).await?;
-        while let Some(batch) = peers.next().await {
-            for indexer in batch {
-                if indexer.port() != 0
-                    && !indexer.ip().is_unspecified()
-                    && !indexer.ip().is_multicast()
-                    && !indexer.ip().is_broadcast()
-                    && seen.insert(indexer)
-                {
-                    tracing::info!(%indexer, "Endpoint indexer advertised at rendezvous");
-                }
-            }
-        }
-        Ok::<_, anyhow::Error>(())
-    };
-    match tokio::time::timeout(Duration::from_secs(30), lookup).await {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => tracing::warn!(%error, "Endpoint indexer rendezvous lookup failed"),
-        Err(_) => tracing::warn!("Endpoint indexer rendezvous lookup timed out after 30 seconds"),
-    }
-    if seen.is_empty() {
-        tracing::warn!(%infohash, "No endpoint indexers found via rendezvous");
-    } else {
-        tracing::info!(
-            count = seen.len(),
-            "Endpoint indexer rendezvous listing complete"
-        );
-    }
-}
-
 async fn announce_once(
     dht: Dht,
     secret: SecretKey,
     hashes: &mut watch::Receiver<HashSet<Hash>>,
 ) -> Result<()> {
     ensure!(dht.bootstrapped().await?, "Mainline bootstrap failed");
-    log_rendezvous_indexers(&dht).await;
     let index = AddrIndex::discover(dht.clone()).await?;
     let publisher = Publisher::new(secret, dht, index);
     sync_announcements(&publisher, hashes).await;

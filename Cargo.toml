@@ -30,9 +30,9 @@ iroh-blobs = "0.103"
 n0-future = "0.3"
 walkdir = "2"
 blake3 = "1"
-iroh-local-gateway = { git = "https://github.com/n0-computer/iroh-content-discovery.git", rev = "9a40d29d3bd961657a812bd99b14a723ecf56a05" }
-iroh-mainline-endpoint-discovery = { git = "https://github.com/n0-computer/iroh-content-discovery.git", rev = "9a40d29d3bd961657a812bd99b14a723ecf56a05" }
-n0-mainline = { version = "0.6", git = "https://github.com/n0-computer/n0-mainline.git", rev = "1c0128550a721326ea183e8ef05c776af569f56f" }
+iroh-local-gateway = { git = "https://github.com/n0-computer/iroh-content-discovery.git", rev = "62b399fa39c710b6f3981273dc4a4153c6ac4811" }
+iroh-mainline-endpoint-discovery = { git = "https://github.com/n0-computer/iroh-content-discovery.git", rev = "62b399fa39c710b6f3981273dc4a4153c6ac4811" }
+n0-mainline = "0.7"
 
 tempfile = "3"
 crossterm = { version = "0.29", features = ["event-stream"] }

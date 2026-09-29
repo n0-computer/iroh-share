@@ -90,11 +90,9 @@ Without `--state-dir`, the daemon and CLI use this per-user location:
 `--state-dir` overrides this location.
 
 Use `daemon --no-announce` to disable Mainline announcements and name publication for local testing.
-At startup, the daemon logs endpoint-indexer `host:port` advertisements from the
-Mainline rendezvous hash at `info` level, deduplicating results over a lookup of up
-to 30 seconds. These are advertised candidates, not verified live indexers. Empty,
-failed, or timed-out lookups produce warnings. Logs go to stderr; set `RUST_LOG`
-to change the default `warn,iroh_share=info` filter. `--no-announce` skips discovery.
+Endpoint indexers come from the signed server list maintained by n0, a Pkarr
+record resolved through Mainline. Logs go to stderr; set `RUST_LOG` to change the
+default `warn,iroh_share=info` filter. `--no-announce` skips discovery.
 
 Normally, a shared Mainline publisher announces completed collections and retries
 on discovery failures. Direct ticket transfers work independently of Mainline.
@@ -180,7 +178,7 @@ and Settings. The page configures the gateway embedded in the daemon:
 
 - **Gateway enabled:** start automatically and keep running with the daemon.
 - **HTTP listen address:** a loopback address, default `127.0.0.1:45475`.
-- **Index server:** an optional IPv4 `host:port`; empty uses Mainline rendezvous discovery.
+- **Index server:** an optional IPv4 `host:port`; empty uses the index servers listed by n0.
 
 Use Up/Down to select, Space to toggle, and Enter to edit a field. Ctrl-U clears
 an edit. Press **s** to save and apply, **r** to discard unsaved changes, or Esc

@@ -6,7 +6,7 @@ use std::net::{SocketAddr, SocketAddrV4};
 pub struct GatewayConfig {
     pub enabled: bool,
     pub listen: SocketAddr,
-    /// None discovers index servers through Mainline rendezvous.
+    /// None uses the index servers listed by n0.
     pub index_server: Option<SocketAddrV4>,
 }
 impl Default for GatewayConfig {
