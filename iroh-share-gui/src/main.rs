@@ -755,7 +755,7 @@ impl App {
                                 icon_button(ui, Icon::Open, "Open directory")
                                     .on_disabled_hover_text("This path is not available on this computer")
                             }).inner.clicked() {
-                                let folder = if path.is_dir() { path.clone() } else { path.parent().unwrap_or(&path).to_path_buf() };
+                                let folder = if path.is_dir() { path.clone() } else { path.parent().unwrap_or(path).to_path_buf() };
                                 let tx = self.local_tx.clone();
                                 self.runtime.spawn_blocking(move || {
                                     let _ = tx.send(LocalUpdate::Opened(open::that(folder).map_err(|e| e.to_string())));
