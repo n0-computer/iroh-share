@@ -64,7 +64,8 @@ impl PairingTicket {
 }
 
 impl Ticket for PairingTicket {
-    const KIND: &'static str = "iroh-share";
+    // No dash, so double-clicking selects the whole ticket.
+    const KIND: &'static str = "irohshare";
 
     fn encode_bytes(&self) -> Vec<u8> {
         postcard::to_allocvec(&self.to_wire()).expect("pairing ticket serialization")
@@ -92,6 +93,10 @@ impl FromStr for PairingTicket {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         if value.len() > 8192 {
             return Err(ParseError::verification_failed("pairing ticket too large"));
+        }
+        // Tickets from daemons before 0.1.4 used the prefix "iroh-share".
+        if let Some(rest) = value.strip_prefix("iroh-share") {
+            return Self::decode_string(&format!("{}{rest}", Self::KIND));
         }
         Self::decode_string(value)
     }
@@ -145,6 +150,14 @@ mod tests {
         assert_eq!(decoded.addr, ticket.addr);
         assert!(decoded.secret.matches(&ticket.secret));
         assert!(!format!("{ticket:?}").contains("123, 123"));
+        assert!(encoded.starts_with("irohshare"));
+        let legacy = encoded.replacen("irohshare", "iroh-share", 1);
+        assert!(legacy
+            .parse::<PairingTicket>()
+            .unwrap()
+            .secret
+            .matches(&ticket.secret));
+        assert!("irohsharegarbage!".parse::<PairingTicket>().is_err());
         assert!("iroh-sharegarbage!".parse::<PairingTicket>().is_err());
         assert!(format!("{encoded}AAAA").parse::<PairingTicket>().is_err());
     }
