@@ -5,6 +5,10 @@ use tokio::sync::mpsc;
 
 pub enum Action {
     ExportNames(PathBuf),
+    ExportRecord {
+        label: String,
+        path: PathBuf,
+    },
     SetGateway(iroh_share_proto::GatewayConfig),
     CompletePath {
         id: u64,
@@ -143,6 +147,7 @@ async fn session(
                 let Some(action) = action else { return Ok(()); };
                 let result = match action {
                     Action::ExportNames(path) => client.export_names(&path).await.map(|()| format!("Exported pkarr names to {}", path.display())),
+                    Action::ExportRecord { label, path } => client.export_record(label, &path).await.map(|()| format!("Exported signed record to {}", path.display())),
                     Action::SetGateway(config) => {
                         let client = client.clone();
                         settings_requests.spawn(async move {

@@ -240,9 +240,13 @@ an existing configured daemon and must never silently replace a remote connectio
 This authenticated operation exports every naming key,
 including names attached to content and keys without a record. Save the archive
 on the client computer; never include its bytes in logs or the Watch stream.
-Entries are `<public-key>/public-key.txt`, `private-key.hex`, and optional
-`record.pkarr`; the latter is public key + signature + big-endian 64-bit timestamp
+Entries are `<public-key>.key`, the raw 32-byte signing seed, and optional
+`<public-key>.pkarr`, which is public key + signature + big-endian 64-bit timestamp
 + DNS packet, the pkarr `SignedPacket::as_bytes` format.
+
+`ExportRecord { label }` returns one name's current record in the same signed
+packet layout, without the private key. It fails for unknown names and for names
+that have not produced a record yet.
 
 `NameTarget::Records(String)` contains zone-style DNS records, one per line:
 `owner TTL IN TYPE value`. Owners are relative to the public key; @ is its root.

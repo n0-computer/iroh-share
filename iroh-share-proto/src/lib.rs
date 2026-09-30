@@ -206,6 +206,13 @@ pub enum WatchEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportNames {}
 
+/// Export one name's current record as a Pkarr signed packet:
+/// public key (32 bytes), signature (64), sequence (8, big endian), DNS packet.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportRecord {
+    pub label: String,
+}
+
 pub type RpcResult<T> = Result<T, String>;
 
 #[rpc_requests(message = ControlMessage, no_spans)]
@@ -254,4 +261,6 @@ pub enum ControlProtocol {
     GetImportDirectory(GetImportDirectory),
     #[rpc(tx=oneshot::Sender<RpcResult<Vec<u8>>>)]
     ExportNames(ExportNames),
+    #[rpc(tx=oneshot::Sender<RpcResult<Vec<u8>>>)]
+    ExportRecord(ExportRecord),
 }

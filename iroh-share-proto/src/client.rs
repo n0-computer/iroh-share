@@ -324,6 +324,20 @@ impl ControlClient {
         result
     }
 
+    /// Save a name's current signed record locally, as a Pkarr signed packet.
+    pub async fn export_record(&self, label: String, output: &std::path::Path) -> Result<()> {
+        let bytes = tokio::time::timeout(
+            Duration::from_secs(10),
+            self.client.rpc(crate::ExportRecord { label }),
+        )
+        .await
+        .context("record export timed out")??
+        .map_err(anyhow::Error::msg)?;
+        tokio::fs::write(output, bytes)
+            .await
+            .context("cannot write record file")
+    }
+
     pub async fn list_names(&self) -> Result<Vec<crate::Name>> {
         tokio::time::timeout(
             Duration::from_secs(10),

@@ -459,12 +459,23 @@ panel's **Export all pkarr names…** action, or run:
 iroh-share names export pkarr-names.zip
 ```
 
-The ZIP is saved on the client computer. Each public-key directory contains
-`public-key.txt` (z-base-32), `private-key.hex` (32-byte Ed25519 signing seed),
-and `record.pkarr` (the current signed packet, if one exists). Aliases are not
-included. `record.pkarr` uses pkarr's `SignedPacket::as_bytes` format. The ZIP
+The ZIP is saved on the client computer. Files are named by the z-base-32 public
+key: `<key>.key` is the raw 32-byte Ed25519 signing seed, the same format as the
+gateway's `--key-file`, and `<key>.pkarr` is the current signed packet, if one
+exists. Aliases are not included. `.pkarr` files use pkarr's
+`SignedPacket::as_bytes` format. The ZIP
 contains unencrypted private keys; export creates a new file without overwriting
 an existing file, with owner-only permissions on Unix.
+
+To save a single name's current signed record, use **Export pkarr…** in that
+name's Actions, or run:
+
+```sh
+iroh-share names export-record <label> <key>.pkarr
+```
+
+The file has the same layout as the `.pkarr` files in the ZIP, which is also how the
+gateway stores signed packets (`index-list.pkarr`). It contains no private key.
 
 The Names panel also provides an advanced multiline DNS editor. Its default is
 an HTTPS alias record:

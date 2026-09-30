@@ -64,6 +64,12 @@ pub struct Published {
     pub result: Result<(), String>,
 }
 
+fn signed_packet(key: &SigningKey, record: &Record) -> Result<Vec<u8>> {
+    let item = MutableItem::new(key, &record.packet, record.sequence, None);
+    iroh_mainline_endpoint_discovery::encode_signed_packet(&item)
+        .context("record cannot be encoded as a Pkarr signed packet")
+}
+
 impl Names {
     pub fn export_zip(&self) -> Result<Vec<u8>> {
         use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
@@ -72,24 +78,29 @@ impl Names {
             .compression_method(CompressionMethod::Stored)
             .unix_permissions(0o600);
         zip.start_file("README.txt", options)?;
-        zip.write_all(b"Iroh Share pkarr backup v1\nEach directory is a z-base-32 public key.\npublic-key.txt: canonical z-base-32 public key.\nprivate-key.hex: 32-byte Ed25519 signing seed, hexadecimal.\nrecord.pkarr: public key (32 bytes), signature (64 bytes), timestamp (8 bytes, big-endian microseconds), DNS packet. Format: pkarr SignedPacket::as_bytes.\nrecord.pkarr is absent if no record has been created yet.\nThis archive contains private signing keys and is not encrypted.\n")?;
+        zip.write_all(b"Iroh Share pkarr backup\nFiles are named by their z-base-32 public key.\n<key>.key: 32-byte Ed25519 signing seed, raw binary.\n<key>.pkarr: public key (32 bytes), signature (64 bytes), timestamp (8 bytes, big-endian microseconds), DNS packet. Format: pkarr SignedPacket::as_bytes.\n<key>.pkarr is absent if no record has been created yet.\nThis archive contains private signing keys and is not encrypted.\n")?;
         for entry in self.db.entries.values() {
             let key = SigningKey::from_bytes(&entry.secret);
             let public = NameKey(*key.verifying_key().as_bytes());
-            zip.start_file(format!("{public}/public-key.txt"), options)?;
-            writeln!(zip, "{public}")?;
-            zip.start_file(format!("{public}/private-key.hex"), options)?;
-            writeln!(zip, "{}", hex::encode(entry.secret))?;
+            zip.start_file(format!("{public}.key"), options)?;
+            zip.write_all(&entry.secret)?;
             if let Some(record) = &entry.record {
-                let item = MutableItem::new(&key, &record.packet, record.sequence, None);
-                zip.start_file(format!("{public}/record.pkarr"), options)?;
-                zip.write_all(item.key())?;
-                zip.write_all(item.signature())?;
-                zip.write_all(&item.seq().to_be_bytes())?;
-                zip.write_all(item.value())?;
+                zip.start_file(format!("{public}.pkarr"), options)?;
+                zip.write_all(&signed_packet(&key, record)?)?;
             }
         }
         Ok(zip.finish()?.into_inner())
+    }
+
+    /// Returns a name's current record as a Pkarr signed packet, the format
+    /// the gateway stores resolved packets in.
+    pub fn export_record(&self, label: &str) -> Result<Vec<u8>> {
+        let entry = self.db.entries.get(label).context("unknown name")?;
+        let record = entry
+            .record
+            .as_ref()
+            .context("name has no signed record yet")?;
+        signed_packet(&SigningKey::from_bytes(&entry.secret), record)
     }
 
     pub fn load(root: &Path, enabled: bool) -> Result<(Self, watch::Receiver<Vec<Publication>>)> {
@@ -632,22 +643,18 @@ mod tests {
         );
         let bytes = names.export_zip()?;
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes))?;
-        assert_eq!(zip.len(), 6);
+        assert_eq!(zip.len(), 4);
         assert!(zip.file_names().all(|name| !name.contains("alias")));
-        let mut secret = String::new();
-        zip.by_name(&format!("{}/private-key.hex", name.key))?
-            .read_to_string(&mut secret)?;
-        let secret: [u8; 32] = hex::decode(secret.trim())?.try_into().unwrap();
+        let mut secret = Vec::new();
+        zip.by_name(&format!("{}.key", name.key))?
+            .read_to_end(&mut secret)?;
+        let secret: [u8; 32] = secret.try_into().unwrap();
         assert_eq!(
             SigningKey::from_bytes(&secret).verifying_key().as_bytes(),
             &name.key.0
         );
-        let mut public = String::new();
-        zip.by_name(&format!("{}/public-key.txt", name.key))?
-            .read_to_string(&mut public)?;
-        assert_eq!(public.trim(), name.key.to_string());
         let mut packet = Vec::new();
-        zip.by_name(&format!("{}/record.pkarr", name.key))?
+        zip.by_name(&format!("{}.pkarr", name.key))?
             .read_to_end(&mut packet)?;
         let public = pkarr::PublicKey::try_from(&name.key.0)?;
         let signed =
@@ -656,8 +663,16 @@ mod tests {
         let record = names.db.entries["private-alias"].record.as_ref().unwrap();
         assert_eq!(&signed.as_bytes()[104..], record.packet.as_slice());
         let pending = NameKey(*SigningKey::from_bytes(&[7; 32]).verifying_key().as_bytes());
-        assert!(zip.by_name(&format!("{pending}/private-key.hex")).is_ok());
-        assert!(zip.by_name(&format!("{pending}/record.pkarr")).is_err());
+        assert!(zip.by_name(&format!("{pending}.key")).is_ok());
+        assert!(zip.by_name(&format!("{pending}.pkarr")).is_err());
+
+        let single = names.export_record("private-alias")?;
+        assert_eq!(single, packet);
+        let item = iroh_mainline_endpoint_discovery::decode_signed_packet(&single).unwrap();
+        assert_eq!(item.key(), &name.key.0);
+        assert_eq!(item.seq(), record.sequence);
+        assert!(names.export_record("pending-alias").is_err());
+        assert!(names.export_record("missing").is_err());
         Ok(())
     }
 

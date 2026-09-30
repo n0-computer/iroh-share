@@ -101,6 +101,11 @@ enum NameCommand {
     Export {
         output: PathBuf,
     },
+    /// Save one name's current signed record as a Pkarr signed packet on this computer.
+    ExportRecord {
+        label: String,
+        output: PathBuf,
+    },
     Create {
         label: String,
         #[command(flatten)]
@@ -288,6 +293,14 @@ impl Actor {
                 ControlMessage::ExportNames(message) => {
                     let result = self.names.export_zip().map_err(|e| e.to_string());
                     let _ = message.tx.send(result).await;
+                }
+                ControlMessage::ExportRecord(message) => {
+                    let WithChannels { inner, tx, .. } = message;
+                    let result = self
+                        .names
+                        .export_record(&inner.label)
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(result).await;
                 }
                 ControlMessage::ListNames(message) => {
                     let result = { Ok(self.names.list()) };
@@ -883,6 +896,10 @@ async fn client(state_dir: &Path, command: CommandLine) -> Result<()> {
                 client.export_names(&output).await?;
                 println!("Exported pkarr names to {}", output.display());
             }
+            NameCommand::ExportRecord { label, output } => {
+                client.export_record(label, &output).await?;
+                println!("Exported signed record to {}", output.display());
+            }
             NameCommand::List => {
                 for name in client.list_names().await? {
                     println!("{}  {}\n{:#?}", name.label, name.key.url(), name);
@@ -1315,9 +1332,7 @@ mod tests {
             .await?
             .map_err(anyhow::Error::msg)?;
         let backup = zip::ZipArchive::new(std::io::Cursor::new(archive))?;
-        assert!(backup
-            .file_names()
-            .any(|name| name.ends_with("/private-key.hex")));
+        assert!(backup.file_names().any(|name| name.ends_with(".key")));
         let (restored, _) = names::Names::load(temp.path(), false)?;
         let saved = restored.restored_data();
         assert!(

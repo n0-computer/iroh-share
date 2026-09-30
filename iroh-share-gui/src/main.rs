@@ -65,6 +65,7 @@ enum Removal {
 }
 enum LocalUpdate {
     ExportNames(Option<PathBuf>),
+    ExportRecord(String, Option<PathBuf>),
     Paired(Result<EndpointId, String>),
     Picked(Option<PathBuf>),
     DownloadFolder(Option<PathBuf>),
@@ -374,6 +375,11 @@ impl App {
                 LocalUpdate::ExportNames(path) => {
                     if let Some(path) = path {
                         self.send(Action::ExportNames(path));
+                    }
+                }
+                LocalUpdate::ExportRecord(label, path) => {
+                    if let Some(path) = path {
+                        self.send(Action::ExportRecord { label, path });
                     }
                 }
                 LocalUpdate::Paired(result) => {
@@ -1060,6 +1066,23 @@ impl App {
                                                             self.selected = Some(*id);
                                                         }
                                                     }
+                                                }
+                                                if ui
+                                                    .button("Export pkarr…")
+                                                    .on_hover_text("Save the current signed record as a .pkarr file.")
+                                                    .clicked()
+                                                {
+                                                    let tx = self.local_tx.clone();
+                                                    let label = name.label.clone();
+                                                    let file_name = format!("{}.pkarr", name.key);
+                                                    self.runtime.spawn_blocking(move || {
+                                                        let path = rfd::FileDialog::new()
+                                                            .set_title("Export signed pkarr record")
+                                                            .set_file_name(file_name)
+                                                            .add_filter("Pkarr signed packet", &["pkarr"])
+                                                            .save_file();
+                                                        let _ = tx.send(LocalUpdate::ExportRecord(label, path));
+                                                    });
                                                 }
                                                 if icon_button(ui, Icon::Trash, "Remove name…")
                                                     .clicked()
