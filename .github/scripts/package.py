@@ -40,11 +40,14 @@ def package(target: str) -> pathlib.Path:
                 version = tomllib.load(manifest)["workspace"]["package"]["version"]
             contents = bundle / "Iroh Share.app" / "Contents"
             (contents / "MacOS").mkdir(parents=True)
+            (contents / "Resources").mkdir()
+            shutil.copy2(root / "packaging" / "macos" / "AppIcon.icns", contents / "Resources" / "AppIcon.icns")
             for binary in ("iroh-share", "iroh-share-background", "iroh-share-gui", "iroh-share-tui"):
                 shutil.copy2(binaries / binary, contents / "MacOS" / binary)
             with (contents / "Info.plist").open("wb") as file:
                 plistlib.dump({
                     "CFBundleExecutable": "iroh-share-gui",
+                    "CFBundleIconFile": "AppIcon",
                     "CFBundleIdentifier": "computer.n0.iroh-share",
                     "CFBundleName": "Iroh Share",
                     "CFBundlePackageType": "APPL",

@@ -36,7 +36,11 @@ fn main() -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 720.0])
-            .with_min_inner_size([640.0, 440.0]),
+            .with_min_inner_size([640.0, 440.0])
+            .with_icon(
+                eframe::icon_data::from_png_bytes(include_bytes!("../../assets/icon-256.png"))
+                    .expect("embedded icon is a valid PNG"),
+            ),
         persistence_path: Some(config.join("window.ron")),
         ..Default::default()
     };
