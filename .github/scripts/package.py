@@ -17,13 +17,23 @@ def package(target: str) -> pathlib.Path:
     binaries = root / "target" / target / "release"
     dist = root / "dist"
     dist.mkdir(exist_ok=True)
-    name = f"iroh-share-{target}"
     windows = "windows" in target
     suffix = ".exe" if windows else ""
+    # Linux splits into a static command-line archive (musl) and a separate
+    # GUI archive (glibc), matching what the release workflow builds per target.
+    if target.endswith("-linux-musl"):
+        name = f"iroh-share-{target}"
+        included = ("iroh-share", "iroh-share-background", "iroh-share-tui")
+    elif target.endswith("-linux-gnu"):
+        name = f"iroh-share-gui-{target}"
+        included = ("iroh-share-gui",)
+    else:
+        name = f"iroh-share-{target}"
+        included = ("iroh-share", "iroh-share-tui", "iroh-share-gui")
     with tempfile.TemporaryDirectory() as temporary:
         bundle = pathlib.Path(temporary) / name
         bundle.mkdir()
-        for binary in ("iroh-share", "iroh-share-tui", "iroh-share-gui"):
+        for binary in included:
             shutil.copy2(binaries / (binary + suffix), bundle / (binary + suffix))
         if windows:
             shutil.copy2(binaries / "iroh-share-background.exe", bundle / "iroh-share-background.exe")

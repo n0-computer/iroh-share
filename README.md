@@ -78,6 +78,14 @@ cargo install --path iroh-share-gui
 cargo install --path iroh-share-tui
 ```
 
+Releases also include prebuilt Linux binaries, for x86_64 and aarch64:
+
+- `iroh-share-<arch>-unknown-linux-musl.tar.gz`: `iroh-share`,
+  `iroh-share-background` and `iroh-share-tui`, statically linked. They run on
+  any Linux, including NAS systems with an old glibc.
+- `iroh-share-gui-x86_64-unknown-linux-gnu.tar.gz`: the desktop GUI. It needs
+  glibc 2.35 or newer, and X11 or Wayland.
+
 For a Linux user service that starts automatically, see the
 [systemd example](packaging/systemd/README.md).
 

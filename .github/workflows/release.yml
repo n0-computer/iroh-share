@@ -19,8 +19,29 @@ jobs:
         include:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            build: cargo build
+            packages: --workspace
           - os: macos-15
             target: aarch64-apple-darwin
+            build: cargo build
+            packages: --workspace
+          # Static daemon, CLI and TUI binaries that run on any Linux, including
+          # NAS systems with an old glibc. Built with zig, which also
+          # cross-compiles aarch64 on an x86_64 runner.
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+            build: cargo zigbuild
+            packages: -p iroh-share -p iroh-share-tui
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-musl
+            build: cargo zigbuild
+            packages: -p iroh-share -p iroh-share-tui
+          # The GUI loads X11, Wayland and OpenGL at runtime, so it cannot be
+          # static. Needs glibc 2.35 or newer.
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            build: cargo build
+            packages: -p iroh-share-gui
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -32,11 +53,25 @@ jobs:
         with:
           key: release-${{ matrix.target }}
           cache-on-failure: true
-      - name: Build all binaries
-        run: cargo build --release --locked --workspace --target ${{ matrix.target }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install zig
+        if: matrix.build == 'cargo zigbuild'
+        run: pip install cargo-zigbuild==0.23.4 ziglang==0.16.0
+      - name: Install desktop build dependencies
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libegl1-mesa-dev
+      - name: Build binaries
+        run: ${{ matrix.build }} --release --locked ${{ matrix.packages }} --target ${{ matrix.target }}
+      - name: Check that the Linux binaries are static and run
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          for binary in iroh-share iroh-share-background iroh-share-tui; do
+            path=target/${{ matrix.target }}/release/$binary
+            file "$path" | grep -qE 'statically linked|static-pie linked' || { file "$path"; exit 1; }
+            "$path" --help > /dev/null
+          done
       - name: Package binaries and checksums
         run: python .github/scripts/package.py ${{ matrix.target }}
       - name: Build per-user Windows installer
