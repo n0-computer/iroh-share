@@ -17,13 +17,19 @@ def package(target: str) -> pathlib.Path:
     binaries = root / "target" / target / "release"
     dist = root / "dist"
     dist.mkdir(exist_ok=True)
-    name = f"iroh-share-{target}"
     windows = "windows" in target
     suffix = ".exe" if windows else ""
+    name = f"iroh-share-{target}"
+    # Linux releases are static musl builds without the GUI, which needs
+    # X11, Wayland and OpenGL at runtime.
+    if "linux" in target:
+        included = ("iroh-share", "iroh-share-background", "iroh-share-tui")
+    else:
+        included = ("iroh-share", "iroh-share-tui", "iroh-share-gui")
     with tempfile.TemporaryDirectory() as temporary:
         bundle = pathlib.Path(temporary) / name
         bundle.mkdir()
-        for binary in ("iroh-share", "iroh-share-tui", "iroh-share-gui"):
+        for binary in included:
             shutil.copy2(binaries / (binary + suffix), bundle / (binary + suffix))
         if windows:
             shutil.copy2(binaries / "iroh-share-background.exe", bundle / "iroh-share-background.exe")
