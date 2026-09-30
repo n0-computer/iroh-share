@@ -22,7 +22,8 @@ OutputBaseFilename=iroh-share-{#AppVersion}-windows-x64-setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-UninstallDisplayIcon={app}\iroh-share-gui.exe
+SetupIconFile=iroh-share.ico
+UninstallDisplayIcon={app}\iroh-share.ico
 CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes
@@ -35,14 +36,15 @@ Source: "{#BuildDir}\iroh-share-gui.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\iroh-share-tui.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\iroh-share-proto\UI.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "iroh-share.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Iroh Share"; ValueData: """{app}\iroh-share-background.exe"""; Flags: uninsdeletevalue
 
 [Icons]
-Name: "{group}\Iroh Share"; Filename: "{app}\iroh-share-gui.exe"; WorkingDir: "{app}"
-Name: "{group}\Start background daemon"; Filename: "{app}\iroh-share-background.exe"; WorkingDir: "{app}"
-Name: "{group}\Stop background daemon"; Filename: "{app}\iroh-share-background.exe"; Parameters: "stop"; WorkingDir: "{app}"
+Name: "{group}\Iroh Share"; Filename: "{app}\iroh-share-gui.exe"; WorkingDir: "{app}"; IconFilename: "{app}\iroh-share.ico"
+Name: "{group}\Start background daemon"; Filename: "{app}\iroh-share-background.exe"; WorkingDir: "{app}"; IconFilename: "{app}\iroh-share.ico"
+Name: "{group}\Stop background daemon"; Filename: "{app}\iroh-share-background.exe"; Parameters: "stop"; WorkingDir: "{app}"; IconFilename: "{app}\iroh-share.ico"
 Name: "{group}\Uninstall Iroh Share"; Filename: "{uninstallexe}"
 
 [Run]
