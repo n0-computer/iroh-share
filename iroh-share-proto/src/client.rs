@@ -289,53 +289,40 @@ impl ControlClient {
         .context("remove name timed out; check names before retrying")??
         .map_err(anyhow::Error::msg)
     }
-    /// Save a private-key backup locally, without overwriting an existing file.
+    /// Save a private-key backup of all names locally, without overwriting an existing file.
     pub async fn export_names(&self, output: &std::path::Path) -> Result<()> {
-        use tokio::io::AsyncWriteExt;
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let file = options
-            .open(output)
-            .context("cannot create export file (choose a new filename)")?;
-        let mut file = tokio::fs::File::from_std(file);
-        let result = tokio::time::timeout(Duration::from_secs(60), async {
-            let bytes = self
-                .client
+        save_private(output, async {
+            self.client
                 .rpc(crate::ExportNames {})
                 .await?
-                .map_err(anyhow::Error::msg)?;
-            file.write_all(&bytes).await?;
-            file.flush().await?;
-            file.sync_all().await?;
-            Ok::<_, anyhow::Error>(())
+                .map_err(anyhow::Error::msg)
         })
         .await
-        .context("name export timed out")
-        .and_then(|result| result);
-        drop(file);
-        if result.is_err() {
-            let _ = tokio::fs::remove_file(output).await;
-        }
-        result
     }
 
-    /// Save a name's current signed record locally, as a Pkarr signed packet.
-    pub async fn export_record(&self, label: String, output: &std::path::Path) -> Result<()> {
-        let bytes = tokio::time::timeout(
-            Duration::from_secs(10),
-            self.client.rpc(crate::ExportRecord { label }),
+    /// Save a private-key backup of one name, in the same layout as [`Self::export_names`].
+    pub async fn export_name(&self, label: String, output: &std::path::Path) -> Result<()> {
+        save_private(output, async {
+            self.client
+                .rpc(crate::ExportName { label })
+                .await?
+                .map_err(anyhow::Error::msg)
+        })
+        .await
+    }
+
+    /// Restore names from a local backup archive.
+    pub async fn import_names(&self, input: &std::path::Path) -> Result<Vec<crate::ImportedName>> {
+        let archive = tokio::fs::read(input)
+            .await
+            .context("cannot read name archive")?;
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            self.client.rpc(crate::ImportNames { archive }),
         )
         .await
-        .context("record export timed out")??
-        .map_err(anyhow::Error::msg)?;
-        tokio::fs::write(output, bytes)
-            .await
-            .context("cannot write record file")
+        .context("name import timed out; check names before retrying")??
+        .map_err(anyhow::Error::msg)
     }
 
     pub async fn list_names(&self) -> Result<Vec<crate::Name>> {
@@ -612,6 +599,40 @@ pub async fn pair(config_dir: &Path, ticket: &crate::PairingTicket) -> Result<()
     endpoint.close().await;
     result?;
     configure_address(config_dir, Some(ticket.addr.clone()))
+}
+
+/// Writes private key material to a new owner-only file, removing it on failure.
+async fn save_private(
+    output: &std::path::Path,
+    bytes: impl std::future::Future<Output = Result<Vec<u8>>>,
+) -> Result<()> {
+    use tokio::io::AsyncWriteExt;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options
+        .open(output)
+        .context("cannot create export file (choose a new filename)")?;
+    let mut file = tokio::fs::File::from_std(file);
+    let result = tokio::time::timeout(Duration::from_secs(60), async {
+        let bytes = bytes.await?;
+        file.write_all(&bytes).await?;
+        file.flush().await?;
+        file.sync_all().await?;
+        Ok::<_, anyhow::Error>(())
+    })
+    .await
+    .context("name export timed out")
+    .and_then(|result| result);
+    drop(file);
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(output).await;
+    }
+    result
 }
 
 #[cfg(test)]

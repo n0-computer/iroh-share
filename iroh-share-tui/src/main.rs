@@ -1020,6 +1020,7 @@ fn name_status(state: &iroh_share_proto::NameState) -> &'static str {
     match state {
         Disabled => "Disabled",
         WaitingForJob => "Waiting for data",
+        NoRecords => "No records yet",
         Publishing { .. } | PublishingRecords => "Publishing",
         Published { .. } | PublishedRecords { .. } => "Published",
         Failed { .. } => "Failed",

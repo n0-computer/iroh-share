@@ -65,7 +65,8 @@ enum Removal {
 }
 enum LocalUpdate {
     ExportNames(Option<PathBuf>),
-    ExportRecord(String, Option<PathBuf>),
+    ExportName(String, Option<PathBuf>),
+    ImportNames(Option<PathBuf>),
     Paired(Result<EndpointId, String>),
     Picked(Option<PathBuf>),
     DownloadFolder(Option<PathBuf>),
@@ -377,9 +378,14 @@ impl App {
                         self.send(Action::ExportNames(path));
                     }
                 }
-                LocalUpdate::ExportRecord(label, path) => {
+                LocalUpdate::ExportName(label, path) => {
                     if let Some(path) = path {
-                        self.send(Action::ExportRecord { label, path });
+                        self.send(Action::ExportName { label, path });
+                    }
+                }
+                LocalUpdate::ImportNames(path) => {
+                    if let Some(path) = path {
+                        self.send(Action::ImportNames(path));
                     }
                 }
                 LocalUpdate::Paired(result) => {
@@ -1069,19 +1075,19 @@ impl App {
                                                 }
                                                 if ui
                                                     .button("Export pkarr…")
-                                                    .on_hover_text("Save the current signed record as a .pkarr file.")
+                                                    .on_hover_text("Save a ZIP with this name's private signing key and current signed record.")
                                                     .clicked()
                                                 {
                                                     let tx = self.local_tx.clone();
                                                     let label = name.label.clone();
-                                                    let file_name = format!("{}.pkarr", name.key);
+                                                    let file_name = format!("{}.zip", name.key);
                                                     self.runtime.spawn_blocking(move || {
                                                         let path = rfd::FileDialog::new()
-                                                            .set_title("Export signed pkarr record")
+                                                            .set_title("Export pkarr name (includes private key)")
                                                             .set_file_name(file_name)
-                                                            .add_filter("Pkarr signed packet", &["pkarr"])
+                                                            .add_filter("ZIP archive", &["zip"])
                                                             .save_file();
-                                                        let _ = tx.send(LocalUpdate::ExportRecord(label, path));
+                                                        let _ = tx.send(LocalUpdate::ExportName(label, path));
                                                     });
                                                 }
                                                 if icon_button(ui, Icon::Trash, "Remove name…")
@@ -1385,6 +1391,14 @@ impl App {
                                         let _ = tx.send(LocalUpdate::ExportNames(path));
                                     });
                                 }
+                                if ui.add_enabled(self.ready && !self.busy, egui::Button::new("Import pkarr names…"))
+                                    .on_hover_text("Restore names from an exported ZIP. Keys this daemon already manages are skipped.").clicked() {
+                                    let tx = self.local_tx.clone();
+                                    self.runtime.spawn_blocking(move || {
+                                        let path = rfd::FileDialog::new().set_title("Import pkarr names").add_filter("ZIP archive", &["zip"]).pick_file();
+                                        let _ = tx.send(LocalUpdate::ImportNames(path));
+                                    });
+                                }
                                 self.names(ui, false);
                             });
                     }
@@ -1437,6 +1451,7 @@ fn name_status(state: &NameState) -> String {
     match state {
         NameState::Disabled => "Disabled".into(),
         NameState::WaitingForJob => "Waiting for data".into(),
+        NameState::NoRecords => "No records yet".into(),
         NameState::Publishing { .. } | NameState::PublishingRecords => "Publishing…".into(),
         NameState::Published { .. } | NameState::PublishedRecords { .. } => "Published".into(),
         NameState::Failed { error } => format!("Failed: {}", error.message),

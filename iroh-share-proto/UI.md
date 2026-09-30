@@ -244,9 +244,17 @@ Entries are `<public-key>.key`, the raw 32-byte signing seed, and optional
 `<public-key>.pkarr`, which is public key + signature + big-endian 64-bit timestamp
 + DNS packet, the pkarr `SignedPacket::as_bytes` format.
 
-`ExportRecord { label }` returns one name's current record in the same signed
-packet layout, without the private key. It fails for unknown names and for names
-that have not produced a record yet.
+`ExportName { label }` returns a ZIP in the same layout containing only that
+name. Treat it like the full backup: it contains the private key.
+
+`ImportNames { archive }` restores names from either kind of archive and returns
+an `ImportedName` per key: `Imported { label }` or `Skipped { reason }`. The daemon
+validates the whole archive first and rejects it without changes if any key or
+record does not verify. Keys it already manages are skipped. Imported names are
+`NameTarget::Records` whose text is rendered from the imported packet; the packet
+itself is republished unchanged until edited. A key without a record gets empty
+records and the `NameState::NoRecords` state until records are set. Watch reports
+imported names as `NameUpdated`.
 
 `NameTarget::Records(String)` contains zone-style DNS records, one per line:
 `owner TTL IN TYPE value`. Owners are relative to the public key; @ is its root.

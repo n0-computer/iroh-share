@@ -463,19 +463,33 @@ The ZIP is saved on the client computer. Files are named by the z-base-32 public
 key: `<key>.key` is the raw 32-byte Ed25519 signing seed, the same format as the
 gateway's `--key-file`, and `<key>.pkarr` is the current signed packet, if one
 exists. Aliases are not included. `.pkarr` files use pkarr's
-`SignedPacket::as_bytes` format. The ZIP
-contains unencrypted private keys; export creates a new file without overwriting
-an existing file, with owner-only permissions on Unix.
+`SignedPacket::as_bytes` format, which is also how the gateway stores signed
+packets (`index-list.pkarr`). The ZIP contains unencrypted private keys; export
+creates a new file without overwriting an existing file, with owner-only
+permissions on Unix.
 
-To save a single name's current signed record, use **Export pkarr…** in that
-name's Actions, or run:
+To back up a single name, use **Export pkarr…** in that name's Actions, or run:
 
 ```sh
-iroh-share names export-record <label> <key>.pkarr
+iroh-share names export-name <label> <key>.zip
 ```
 
-The file has the same layout as the `.pkarr` files in the ZIP, which is also how the
-gateway stores signed packets (`index-list.pkarr`). It contains no private key.
+This writes the same ZIP layout with just that name.
+
+Restore names with **Import pkarr names…** in the Names panel, or run:
+
+```sh
+iroh-share names import pkarr-names.zip
+```
+
+The whole archive is verified before anything is added: every key must match
+its file name, and every record must carry a valid signature for its key. Keys
+the daemon already manages are skipped, never overwritten. Imported names get
+labels like `imported-<key prefix>` and become advanced DNS names holding the
+imported records, which are republished unchanged until you edit them. A name
+that followed data on the old machine no longer follows anything. A key without
+a record is imported with no records and shows **No records yet**; it publishes
+once you add records.
 
 The Names panel also provides an advanced multiline DNS editor. Its default is
 an HTTPS alias record:

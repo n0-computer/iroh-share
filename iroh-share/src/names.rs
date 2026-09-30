@@ -2,7 +2,8 @@
 use crate::recovery::{DownloadPhase, SavedData};
 use anyhow::{ensure, Context, Result};
 use iroh_share_proto::{
-    Job, JobError, JobKind, JobState, Name, NameKey, NameState, NameTarget, Url,
+    ImportOutcome, ImportedName, Job, JobError, JobKind, JobState, Name, NameKey, NameState,
+    NameTarget, Url,
 };
 use n0_mainline::{Dht, MutableItem, SigningKey};
 use serde::{Deserialize, Serialize};
@@ -64,6 +65,92 @@ pub struct Published {
     pub result: Result<(), String>,
 }
 
+/// Keys (`<public-key>.key`) and signed records (`<public-key>.pkarr`) in a ZIP.
+fn archive<'a>(entries: impl IntoIterator<Item = &'a Entry>) -> Result<Vec<u8>> {
+    use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
+    let mut zip = ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Stored)
+        .unix_permissions(0o600);
+    zip.start_file("README.txt", options)?;
+    zip.write_all(b"Iroh Share pkarr backup\nFiles are named by their z-base-32 public key.\n<key>.key: 32-byte Ed25519 signing seed, raw binary.\n<key>.pkarr: public key (32 bytes), signature (64 bytes), timestamp (8 bytes, big-endian microseconds), DNS packet. Format: pkarr SignedPacket::as_bytes.\n<key>.pkarr is absent if no record has been created yet.\nThis archive contains private signing keys and is not encrypted.\n")?;
+    for entry in entries {
+        let key = SigningKey::from_bytes(&entry.secret);
+        let public = NameKey(*key.verifying_key().as_bytes());
+        zip.start_file(format!("{public}.key"), options)?;
+        zip.write_all(&entry.secret)?;
+        if let Some(record) = &entry.record {
+            zip.start_file(format!("{public}.pkarr"), options)?;
+            zip.write_all(&signed_packet(&key, record)?)?;
+        }
+    }
+    Ok(zip.finish()?.into_inner())
+}
+
+/// Reads and verifies every key and record in an archive written by [`archive`].
+fn read_archive(bytes: &[u8]) -> Result<Vec<ArchivedName>> {
+    use std::io::Read;
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).context("not a ZIP archive")?;
+    let mut keys = BTreeMap::new();
+    let mut records = BTreeMap::new();
+    for index in 0..zip.len() {
+        let file = zip.by_index(index)?;
+        let name = file.name().to_owned();
+        if name == "README.txt" || file.is_dir() {
+            continue;
+        }
+        let public = name
+            .rsplit_once('.')
+            .and_then(|(stem, _)| z32::decode(stem.as_bytes()).ok())
+            .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+            .with_context(|| format!("{name}: not named by a public key"))?;
+        // Keys are 32 bytes and records at most 1104; anything larger is not ours.
+        let mut data = Vec::new();
+        file.take(2048).read_to_end(&mut data)?;
+        if name.ends_with(".key") {
+            let secret = <[u8; 32]>::try_from(data)
+                .map_err(|_| anyhow::anyhow!("{name}: expected a 32-byte key"))?;
+            ensure!(
+                SigningKey::from_bytes(&secret).verifying_key().as_bytes() == &public,
+                "{name}: key does not match its file name"
+            );
+            keys.insert(public, secret);
+        } else if name.ends_with(".pkarr") {
+            let item = iroh_mainline_endpoint_discovery::decode_signed_packet(&data)
+                .with_context(|| format!("{name}: invalid signed packet"))?;
+            ensure!(
+                item.key() == &public,
+                "{name}: record does not match its file name"
+            );
+            records.insert(public, item);
+        } else {
+            anyhow::bail!("unexpected file {name}");
+        }
+    }
+    for public in records.keys() {
+        ensure!(
+            keys.contains_key(public),
+            "{}.pkarr has no matching key",
+            NameKey(*public)
+        );
+    }
+    ensure!(!keys.is_empty(), "archive contains no names");
+    Ok(keys
+        .into_iter()
+        .map(|(public, secret)| ArchivedName {
+            key: NameKey(public),
+            secret,
+            record: records.remove(&public),
+        })
+        .collect())
+}
+
+struct ArchivedName {
+    key: NameKey,
+    secret: [u8; 32],
+    record: Option<MutableItem>,
+}
+
 fn signed_packet(key: &SigningKey, record: &Record) -> Result<Vec<u8>> {
     let item = MutableItem::new(key, &record.packet, record.sequence, None);
     iroh_mainline_endpoint_discovery::encode_signed_packet(&item)
@@ -72,35 +159,84 @@ fn signed_packet(key: &SigningKey, record: &Record) -> Result<Vec<u8>> {
 
 impl Names {
     pub fn export_zip(&self) -> Result<Vec<u8>> {
-        use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
-        let mut zip = ZipWriter::new(std::io::Cursor::new(Vec::new()));
-        let options = SimpleFileOptions::default()
-            .compression_method(CompressionMethod::Stored)
-            .unix_permissions(0o600);
-        zip.start_file("README.txt", options)?;
-        zip.write_all(b"Iroh Share pkarr backup\nFiles are named by their z-base-32 public key.\n<key>.key: 32-byte Ed25519 signing seed, raw binary.\n<key>.pkarr: public key (32 bytes), signature (64 bytes), timestamp (8 bytes, big-endian microseconds), DNS packet. Format: pkarr SignedPacket::as_bytes.\n<key>.pkarr is absent if no record has been created yet.\nThis archive contains private signing keys and is not encrypted.\n")?;
-        for entry in self.db.entries.values() {
-            let key = SigningKey::from_bytes(&entry.secret);
-            let public = NameKey(*key.verifying_key().as_bytes());
-            zip.start_file(format!("{public}.key"), options)?;
-            zip.write_all(&entry.secret)?;
-            if let Some(record) = &entry.record {
-                zip.start_file(format!("{public}.pkarr"), options)?;
-                zip.write_all(&signed_packet(&key, record)?)?;
-            }
-        }
-        Ok(zip.finish()?.into_inner())
+        archive(self.db.entries.values())
     }
 
-    /// Returns a name's current record as a Pkarr signed packet, the format
-    /// the gateway stores resolved packets in.
-    pub fn export_record(&self, label: &str) -> Result<Vec<u8>> {
-        let entry = self.db.entries.get(label).context("unknown name")?;
-        let record = entry
-            .record
-            .as_ref()
-            .context("name has no signed record yet")?;
-        signed_packet(&SigningKey::from_bytes(&entry.secret), record)
+    /// Exports one name's key and record, in the same layout as [`Self::export_zip`].
+    pub fn export_name(&self, label: &str) -> Result<Vec<u8>> {
+        archive([self.db.entries.get(label).context("unknown name")?])
+    }
+
+    /// Adds the names in an exported archive, skipping keys already present.
+    ///
+    /// The whole archive is validated before anything is saved. A signed
+    /// record is kept as-is and republished unchanged until the name is edited.
+    pub fn import_zip(
+        &mut self,
+        bytes: &[u8],
+        jobs: &BTreeMap<u64, Job>,
+    ) -> Result<Vec<ImportedName>> {
+        let imports = read_archive(bytes)?;
+        let mut db = self.db.clone();
+        let mut outcomes = Vec::new();
+        for ArchivedName {
+            key,
+            secret,
+            record: item,
+        } in imports
+        {
+            if db.entries.values().any(|entry| entry.secret == secret) {
+                outcomes.push(ImportedName {
+                    key,
+                    outcome: ImportOutcome::Skipped {
+                        reason: "already managed by this daemon".into(),
+                    },
+                });
+                continue;
+            }
+            let (target, record) = match item {
+                Some(item) => {
+                    // An unrenderable packet still republishes; only editing needs text.
+                    let text = crate::dns_records::text(key, item.value())
+                        .unwrap_or_else(|error| format!("; records could not be shown: {error}\n"));
+                    let record = Record {
+                        url: None,
+                        sequence: item.seq(),
+                        packet: item.value().to_vec(),
+                    };
+                    (NameTarget::Records(text), Some(record))
+                }
+                None => (NameTarget::Records(String::new()), None),
+            };
+            let base = format!("imported-{}", &key.to_string()[..8]);
+            let mut label = base.clone();
+            let mut suffix = 2;
+            while db.entries.contains_key(&label) {
+                label = format!("{base}-{suffix}");
+                suffix += 1;
+            }
+            db.entries.insert(
+                label.clone(),
+                Entry {
+                    secret,
+                    target,
+                    record,
+                    share_path: None,
+                },
+            );
+            outcomes.push(ImportedName {
+                key,
+                outcome: ImportOutcome::Imported { label },
+            });
+        }
+        if outcomes
+            .iter()
+            .any(|o| matches!(o.outcome, ImportOutcome::Imported { .. }))
+        {
+            self.commit(db)?;
+            self.refresh(jobs)?;
+        }
+        Ok(outcomes)
     }
 
     pub fn load(root: &Path, enabled: bool) -> Result<(Self, watch::Receiver<Vec<Publication>>)> {
@@ -362,17 +498,20 @@ impl Names {
                 NameTarget::Job(id) => jobs.contains_key(id),
                 _ => true,
             };
-            let state = if !self.enabled {
-                Some(NameState::Disabled)
-            } else if !available || entry.record.is_none() {
-                Some(NameState::WaitingForJob)
-            } else if changed.contains(label) || !self.states.contains_key(label) {
-                Some(match &entry.record.as_ref().unwrap().url {
-                    Some(url) => NameState::Publishing { url: url.clone() },
-                    None => NameState::PublishingRecords,
-                })
-            } else {
-                None
+            let state = match (&entry.record, &entry.target) {
+                _ if !self.enabled => Some(NameState::Disabled),
+                (None, NameTarget::Records(_)) => Some(NameState::NoRecords),
+                (Some(record), _) if available => {
+                    if changed.contains(label) || !self.states.contains_key(label) {
+                        Some(match &record.url {
+                            Some(url) => NameState::Publishing { url: url.clone() },
+                            None => NameState::PublishingRecords,
+                        })
+                    } else {
+                        None
+                    }
+                }
+                _ => Some(NameState::WaitingForJob),
             };
             if let Some(state) = state {
                 self.states.insert(label.clone(), state);
@@ -415,7 +554,7 @@ impl Names {
             || record.sequence != update.sequence
             || matches!(
                 current.state,
-                NameState::Disabled | NameState::WaitingForJob
+                NameState::Disabled | NameState::WaitingForJob | NameState::NoRecords
             )
         {
             return None;
@@ -666,13 +805,174 @@ mod tests {
         assert!(zip.by_name(&format!("{pending}.key")).is_ok());
         assert!(zip.by_name(&format!("{pending}.pkarr")).is_err());
 
-        let single = names.export_record("private-alias")?;
-        assert_eq!(single, packet);
-        let item = iroh_mainline_endpoint_discovery::decode_signed_packet(&single).unwrap();
-        assert_eq!(item.key(), &name.key.0);
-        assert_eq!(item.seq(), record.sequence);
-        assert!(names.export_record("pending-alias").is_err());
-        assert!(names.export_record("missing").is_err());
+        let single = names.export_name("private-alias")?;
+        let mut single = zip::ZipArchive::new(std::io::Cursor::new(single))?;
+        assert_eq!(single.len(), 3);
+        let mut single_packet = Vec::new();
+        single
+            .by_name(&format!("{}.pkarr", name.key))?
+            .read_to_end(&mut single_packet)?;
+        assert_eq!(single_packet, packet);
+        assert!(names.export_name("missing").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn import_restores_keys_and_records_and_skips_known_keys() -> Result<()> {
+        let jobs = BTreeMap::new();
+        let source = tempfile::tempdir()?;
+        let (mut names, _) = Names::load(source.path(), true)?;
+        let published = names.set(
+            "site".into(),
+            NameTarget::Records("@ 300 IN TXT \"hello\"\n".into()),
+            true,
+            &jobs,
+        )?;
+        names.db.entries.insert(
+            "pending".into(),
+            Entry {
+                secret: [7; 32],
+                target: NameTarget::Job(99),
+                record: None,
+                share_path: None,
+            },
+        );
+        let archive = names.export_zip()?;
+        let original = names.db.entries["site"].record.clone().unwrap();
+
+        let target = tempfile::tempdir()?;
+        let (mut restored, _) = Names::load(target.path(), true)?;
+        let outcomes = restored.import_zip(&archive, &jobs)?;
+        assert_eq!(outcomes.len(), 2);
+        assert!(outcomes
+            .iter()
+            .all(|o| matches!(o.outcome, ImportOutcome::Imported { .. })));
+        let by_key = |key: NameKey| {
+            let (label, entry) = restored
+                .db
+                .entries
+                .iter()
+                .find(|(_, e)| {
+                    SigningKey::from_bytes(&e.secret).verifying_key().as_bytes() == &key.0
+                })
+                .unwrap();
+            (label.clone(), entry.clone())
+        };
+        let (site, entry) = by_key(published.key);
+        let record = entry.record.unwrap();
+        assert_eq!(record.packet, original.packet);
+        assert_eq!(record.sequence, original.sequence);
+        assert_eq!(
+            entry.target,
+            NameTarget::Records("@ 300 IN TXT \"hello\"\n".into())
+        );
+        let pending = NameKey(*SigningKey::from_bytes(&[7; 32]).verifying_key().as_bytes());
+        let (pending_label, entry) = by_key(pending);
+        assert!(entry.record.is_none());
+        assert_eq!(
+            restored.get(&pending_label).unwrap().state,
+            NameState::NoRecords
+        );
+        assert!(!restored
+            .publications
+            .borrow()
+            .iter()
+            .any(|p| p.key == pending));
+        assert!(restored
+            .publications
+            .borrow()
+            .iter()
+            .any(|p| p.key == published.key));
+
+        // Restoring again, or into the source, changes nothing.
+        let before = restored.list();
+        assert!(restored
+            .import_zip(&archive, &jobs)?
+            .iter()
+            .all(|o| matches!(o.outcome, ImportOutcome::Skipped { .. })));
+        assert_eq!(restored.list(), before);
+        assert!(names
+            .import_zip(&archive, &jobs)?
+            .iter()
+            .all(|o| matches!(o.outcome, ImportOutcome::Skipped { .. })));
+
+        // Editing an imported record moves its sequence forward.
+        let edited = restored.set(
+            site.clone(),
+            NameTarget::Records("@ 300 IN TXT \"bye\"\n".into()),
+            false,
+            &jobs,
+        )?;
+        assert_eq!(edited.key, published.key);
+        assert!(restored.db.entries[&site].record.as_ref().unwrap().sequence > original.sequence);
+        Ok(())
+    }
+
+    #[test]
+    fn import_accepts_recompressed_archives() -> Result<()> {
+        use std::io::Read;
+        use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
+        let jobs = BTreeMap::new();
+        let source = tempfile::tempdir()?;
+        let (mut names, _) = Names::load(source.path(), false)?;
+        let name = names.set(
+            "site".into(),
+            NameTarget::Records("@ 300 IN TXT \"hello\"\n".into()),
+            true,
+            &jobs,
+        )?;
+        // Re-zip the export with compression, as desktop archivers do.
+        let mut stored = zip::ZipArchive::new(std::io::Cursor::new(names.export_zip()?))?;
+        let mut deflated = ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for index in 0..stored.len() {
+            let mut file = stored.by_index(index)?;
+            let mut data = Vec::new();
+            file.read_to_end(&mut data)?;
+            deflated.start_file(
+                file.name(),
+                SimpleFileOptions::default().compression_method(CompressionMethod::Deflated),
+            )?;
+            deflated.write_all(&data)?;
+        }
+        let archive = deflated.finish()?.into_inner();
+
+        let target = tempfile::tempdir()?;
+        let (mut restored, _) = Names::load(target.path(), false)?;
+        let outcomes = restored.import_zip(&archive, &jobs)?;
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].key, name.key);
+        assert!(matches!(
+            outcomes[0].outcome,
+            ImportOutcome::Imported { .. }
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn import_rejects_mismatched_archives_without_changes() -> Result<()> {
+        use zip::{write::SimpleFileOptions, ZipWriter};
+        let root = tempfile::tempdir()?;
+        let (mut names, _) = Names::load(root.path(), false)?;
+        let pending = NameKey(*SigningKey::from_bytes(&[7; 32]).verifying_key().as_bytes());
+        let write = |files: &[(String, &[u8])]| -> Result<Vec<u8>> {
+            let mut zip = ZipWriter::new(std::io::Cursor::new(Vec::new()));
+            for (name, data) in files {
+                zip.start_file(name.as_str(), SimpleFileOptions::default())?;
+                zip.write_all(data)?;
+            }
+            Ok(zip.finish()?.into_inner())
+        };
+        for archive in [
+            write(&[(format!("{pending}.key"), &[8; 32])])?,
+            write(&[(format!("{pending}.key"), &[7; 31])])?,
+            write(&[(format!("{pending}.pkarr"), &[0; 120])])?,
+            write(&[("notes.txt".into(), b"hi")])?,
+            write(&[])?,
+            b"not a zip".to_vec(),
+        ] {
+            assert!(names.import_zip(&archive, &BTreeMap::new()).is_err());
+        }
+        assert!(names.list().is_empty());
         Ok(())
     }
 

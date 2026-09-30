@@ -61,11 +61,22 @@ impl NameTarget {
 pub enum NameState {
     Disabled,
     WaitingForJob,
-    Publishing { url: Url },
-    Published { url: Url, sequence: i64 },
-    Failed { error: JobError },
+    Publishing {
+        url: Url,
+    },
+    Published {
+        url: Url,
+        sequence: i64,
+    },
+    Failed {
+        error: JobError,
+    },
     PublishingRecords,
-    PublishedRecords { sequence: i64 },
+    PublishedRecords {
+        sequence: i64,
+    },
+    /// The name has a key but no records; it publishes once records are set.
+    NoRecords,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,6 +103,18 @@ pub struct RemoveName {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListNames {}
+
+/// What happened to one key of an imported archive.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportedName {
+    pub key: NameKey,
+    pub outcome: ImportOutcome,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ImportOutcome {
+    Imported { label: String },
+    Skipped { reason: String },
+}
 
 /// Editable HTTPS origin alias; preserve full-URL targets as URI records.
 pub fn redirect_records(url: &Url) -> String {
