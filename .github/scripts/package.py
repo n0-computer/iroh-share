@@ -19,16 +19,12 @@ def package(target: str) -> pathlib.Path:
     dist.mkdir(exist_ok=True)
     windows = "windows" in target
     suffix = ".exe" if windows else ""
-    # Linux splits into a static command-line archive (musl) and a separate
-    # GUI archive (glibc), matching what the release workflow builds per target.
-    if target.endswith("-linux-musl"):
-        name = f"iroh-share-{target}"
+    name = f"iroh-share-{target}"
+    # Linux releases are static musl builds without the GUI, which needs
+    # X11, Wayland and OpenGL at runtime.
+    if "linux" in target:
         included = ("iroh-share", "iroh-share-background", "iroh-share-tui")
-    elif target.endswith("-linux-gnu"):
-        name = f"iroh-share-gui-{target}"
-        included = ("iroh-share-gui",)
     else:
-        name = f"iroh-share-{target}"
         included = ("iroh-share", "iroh-share-tui", "iroh-share-gui")
     with tempfile.TemporaryDirectory() as temporary:
         bundle = pathlib.Path(temporary) / name

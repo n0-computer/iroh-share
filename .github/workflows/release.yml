@@ -36,12 +36,6 @@ jobs:
             target: aarch64-unknown-linux-musl
             build: cargo zigbuild
             packages: -p iroh-share -p iroh-share-tui
-          # The GUI loads X11, Wayland and OpenGL at runtime, so it cannot be
-          # static. Needs glibc 2.35 or newer.
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            build: cargo build
-            packages: -p iroh-share-gui
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -59,9 +53,6 @@ jobs:
       - name: Install zig
         if: matrix.build == 'cargo zigbuild'
         run: pip install cargo-zigbuild==0.23.4 ziglang==0.16.0
-      - name: Install desktop build dependencies
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libegl1-mesa-dev
       - name: Build binaries
         run: ${{ matrix.build }} --release --locked ${{ matrix.packages }} --target ${{ matrix.target }}
       - name: Check that the Linux binaries are static and run
