@@ -36,6 +36,7 @@ class SpkLayout(unittest.TestCase):
                     payload = io.BytesIO(out.extractfile("package.tgz").read())
                 with tarfile.open(fileobj=payload) as package:
                     self.assertTrue(package.getmember("bin/iroh-share").mode & 0o111)
+                    self.assertIn("LICENSE-MIT", package.getnames())
                     for arch, target in build.ARCHES.items():
                         for binary in build.BINARIES:
                             member = f"bin/{arch}/{binary}"

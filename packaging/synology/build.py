@@ -60,6 +60,8 @@ def payload(dist: pathlib.Path) -> bytes:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as package:
         add(package, "bin/iroh-share", (HERE / "bin" / "iroh-share").read_bytes(), 0o755)
+        for license in ("LICENSE-APACHE", "LICENSE-MIT"):
+            add(package, license, (ROOT / license).read_bytes(), 0o644)
         for arch, target in ARCHES.items():
             with tarfile.open(dist / f"iroh-share-{target}.tar.gz") as release:
                 for binary in BINARIES:

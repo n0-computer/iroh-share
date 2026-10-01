@@ -34,6 +34,8 @@ def package(target: str) -> pathlib.Path:
         if windows:
             shutil.copy2(binaries / "iroh-share-background.exe", bundle / "iroh-share-background.exe")
         shutil.copy2(root / "README.md", bundle / "README.md")
+        for license in ("LICENSE-APACHE", "LICENSE-MIT"):
+            shutil.copy2(root / license, bundle / license)
         shutil.copy2(root / "iroh-share-proto" / "UI.md", bundle / "UI.md")
         if "apple" in target:
             with (root / "Cargo.toml").open("rb") as manifest:
