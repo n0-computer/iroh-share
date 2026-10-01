@@ -26,9 +26,10 @@ Package Center starts the daemon at boot. It does not restart it after a crash.
   uninstalling removes it.
 
 The state is in `state/`, the log in `daemon.log` (the previous run in
-`daemon.previous.log`), and ticket imports in `Downloads/Iroh Share`. To change
-the log filter, put a `RUST_LOG` value such as `info,iroh_blobs::provider=debug`
-in `rust_log` and restart the package.
+`daemon.previous.log`), and ticket imports in `Downloads/Iroh Share`. The log
+filter defaults to `info,iroh_blobs=debug`, which logs each request, why it
+failed, and problems in the blob store. To change it, put a `RUST_LOG` value in `rust_log` and
+restart the package.
 
 ## Pairing a GUI or TUI
 
