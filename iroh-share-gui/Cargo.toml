@@ -3,6 +3,10 @@ name = "iroh-share-gui"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Desktop interface for the iroh-share daemon"
+readme = "../README.md"
 
 [dependencies]
 eframe = { version = "0.33", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "persistence"] }

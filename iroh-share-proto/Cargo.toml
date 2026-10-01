@@ -3,6 +3,10 @@ name = "iroh-share-proto"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Control protocol and client helpers for the iroh-share daemon"
+readme = "../README.md"
 
 [dependencies]
 iroh-tickets = "1"

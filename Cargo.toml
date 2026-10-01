@@ -6,7 +6,9 @@ resolver = "2"
 [workspace.package]
 version = "0.1.5"
 edition = "2021"
-license = "Apache-2.0 OR MIT"
+license = "MIT OR Apache-2.0"
+authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>", "n0 team"]
+repository = "https://github.com/n0-computer/iroh-share"
 
 [workspace.dependencies]
 url = { version = "2", features = ["serde"] }

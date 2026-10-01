@@ -3,6 +3,10 @@ name = "iroh-share-tui"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Terminal interface for the iroh-share daemon"
+readme = "../README.md"
 
 [dependencies]
 arboard = { version = "3", default-features = false }
