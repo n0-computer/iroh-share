@@ -30,6 +30,12 @@ The state is in `state/`, the log in `daemon.log` (the previous run in
 the log filter, put a `RUST_LOG` value such as `info,iroh_blobs::provider=debug`
 in `rust_log` and restart the package.
 
+## Pairing a GUI or TUI
+
+Package Center's log view for the package (View Log) starts with a fresh
+single-use pairing ticket, followed by the end of `daemon.log`. Each view makes
+a new ticket. The ticket is never written to `daemon.log`.
+
 ## Using the CLI
 
 `bin/iroh-share` runs the right binary with the package's state, so CLI

@@ -36,7 +36,21 @@ case "$1" in
         running || exit 3
         ;;
     log)
-        echo "$LOG"
+        # Package Center shows this file under View Log. It starts with a fresh
+        # single-use pairing ticket, which daemon.log deliberately never has.
+        OUT=$VAR/package.log
+        umask 077
+        {
+            if running; then
+                echo "Pairing ticket for a GUI or TUI (single use):"
+                HOME=$VAR "$CLI" control pair 2>&1
+            else
+                echo "iroh-share is not running."
+            fi
+            echo
+            tail -n 200 "$LOG" 2>/dev/null
+        } > "$OUT"
+        echo "$OUT"
         ;;
 esac
 exit 0
