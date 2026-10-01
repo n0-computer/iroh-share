@@ -179,7 +179,7 @@ impl Page {
         match &self.edit {
             Some(Edit::Ticket(value)) => rows.push(Line::from(format!(
                 "\nPairing ticket: {}▏ · Enter adds · Esc cancels",
-                "•".repeat(value.chars().count().min(40))
+                crate::clean(value)
             ))),
             Some(Edit::Name(value)) => rows.push(Line::from(format!(
                 "\nName: {}▏ · Enter saves · empty clears · Esc cancels",

@@ -1339,7 +1339,7 @@ impl App {
                 ui.heading(if self.daemons.is_empty() { "Connect to Iroh Share" } else { "Add a daemon" });
                 ui.label("Paste the one-time ticket printed by your daemon. The daemon is saved and can be switched from the menu.");
                 ui.add_enabled_ui(!self.busy, |ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.ticket).password(true).hint_text("Pairing ticket").desired_width(f32::INFINITY));
+                    ui.add(egui::TextEdit::singleline(&mut self.ticket).hint_text("Pairing ticket").desired_width(f32::INFINITY));
                     ui.add(egui::TextEdit::singleline(&mut self.new_daemon_name).hint_text("Name (optional), e.g. NAS").desired_width(f32::INFINITY));
                     ui.horizontal(|ui| {
                         if ui.button("Connect").clicked() { self.pair(); }
