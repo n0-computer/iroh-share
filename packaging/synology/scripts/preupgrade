@@ -1,0 +1,10 @@
+#!/bin/sh
+# DSM 6 keeps package data in target/var and replaces target on upgrade, so
+# move the data next to it on the same volume. DSM 7 keeps data elsewhere.
+TARGET=/var/packages/iroh-share/target
+if [ -d "$TARGET/var" ]; then
+    BACKUP="$(readlink -f "$TARGET")-var-backup"
+    rm -rf "$BACKUP"
+    mv "$TARGET/var" "$BACKUP"
+fi
+exit 0

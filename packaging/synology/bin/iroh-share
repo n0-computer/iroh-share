@@ -1,0 +1,16 @@
+#!/bin/sh
+# Runs iroh-share for this NAS's architecture with the package's state, so
+# CLI commands over SSH talk to the daemon Package Center started, e.g.
+#   sudo -u iroh-share /var/packages/iroh-share/target/bin/iroh-share list
+TARGET=/var/packages/iroh-share/target
+# DSM 7 keeps package data in var; DSM 6 has no var, so data lives in target.
+VAR=/var/packages/iroh-share/var
+[ -d "$VAR" ] || VAR=$TARGET/var
+
+case "$(uname -m)" in
+    x86_64) ARCH=x86_64 ;;
+    aarch64) ARCH=aarch64 ;;
+    *) echo "iroh-share: unsupported architecture $(uname -m)" >&2; exit 1 ;;
+esac
+
+exec "$TARGET/bin/$ARCH/iroh-share" --state-dir "$VAR/state" "$@"

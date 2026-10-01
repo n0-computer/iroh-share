@@ -1,0 +1,42 @@
+#!/bin/sh
+# Package Center calls this with start, stop, status and log.
+TARGET=/var/packages/iroh-share/target
+VAR=/var/packages/iroh-share/var
+[ -d "$VAR" ] || VAR=$TARGET/var
+PID=$VAR/daemon.pid
+LOG=$VAR/daemon.log
+CLI=$TARGET/bin/iroh-share
+
+running() {
+    [ -f "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null
+}
+
+case "$1" in
+    start)
+        running && exit 0
+        mkdir -p "$VAR"
+        [ -f "$LOG" ] && mv -f "$LOG" "$VAR/daemon.previous.log"
+        # Put RUST_LOG filters in $VAR/rust_log to debug, e.g.
+        # info,iroh_blobs::provider=debug
+        RUST_LOG=info
+        [ -f "$VAR/rust_log" ] && RUST_LOG=$(cat "$VAR/rust_log")
+        # Ticket imports default to $HOME/Downloads/Iroh Share.
+        HOME=$VAR RUST_LOG=$RUST_LOG nohup "$CLI" daemon --no-pairing-ticket >> "$LOG" 2>&1 &
+        echo $! > "$PID"
+        ;;
+    stop)
+        if running; then
+            HOME=$VAR "$CLI" control stop >> "$LOG" 2>&1 || kill "$(cat "$PID")"
+            for _ in $(seq 30); do running || break; sleep 1; done
+            running && kill -9 "$(cat "$PID")"
+        fi
+        rm -f "$PID"
+        ;;
+    status)
+        running || exit 3
+        ;;
+    log)
+        echo "$LOG"
+        ;;
+esac
+exit 0

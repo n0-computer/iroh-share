@@ -91,9 +91,33 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  # DSM 6 and DSM 7 packages from the static x86_64 and aarch64 Linux builds.
+  synology:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: iroh-share-*-unknown-linux-musl
+          path: dist
+          merge-multiple: true
+      - name: Test the package builder
+        run: python -m unittest discover -s packaging/synology
+      - name: Build Synology packages
+        run: python packaging/synology/build.py dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iroh-share-synology
+          path: dist/*.spk*
+          if-no-files-found: error
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, synology]
     runs-on: ubuntu-latest
     permissions:
       contents: write
