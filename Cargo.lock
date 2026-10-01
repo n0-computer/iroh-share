@@ -3206,7 +3206,7 @@ dependencies = [
 
 [[package]]
 name = "iroh-share"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "bao-tree",
@@ -3243,7 +3243,7 @@ dependencies = [
 
 [[package]]
 name = "iroh-share-gui"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "clap",
@@ -3259,7 +3259,7 @@ dependencies = [
 
 [[package]]
 name = "iroh-share-proto"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "dirs",
@@ -3281,7 +3281,7 @@ dependencies = [
 
 [[package]]
 name = "iroh-share-tui"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "arboard",
