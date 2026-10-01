@@ -877,7 +877,10 @@ impl App {
                                     }
                                 }
                                 if let JobState::Seeding { ticket, .. } = &job.state {
-                                    link(ui, content_url(ticket));
+                                    row_line(ui, |ui| {
+                                        link_contents(ui, &content_url(ticket));
+                                        copy_ticket(ui, &ticket.to_string());
+                                    });
                                 } else {
                                     row_line(ui, |ui| { ui.weak("Content link available after import"); });
                                 }
@@ -885,12 +888,6 @@ impl App {
                             table_cell(ui, 300.0, row_height, |ui| {
                             ui.push_id(job.id, |ui| {
                                 ui.allocate_ui_with_layout(egui::vec2(300.0, 24.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                                if let JobState::Seeding { ticket, .. } = &job.state {
-                                    if icon_button(ui, Icon::Copy, "Copy ticket").clicked() {
-                                        ui.ctx().copy_text(ticket.to_string());
-                                        self.status = "Ticket copied".into();
-                                    }
-                                }
                                 if ui.add_enabled(self.ready && !self.busy, egui::Button::new("Add name")).clicked() {
                                     let target = NameTarget::Job(job.id);
                                     let label = self.automatic_name_label(&target);
@@ -993,9 +990,12 @@ impl App {
         });
     }
     fn names(&mut self, ui: &mut egui::Ui, content: bool) {
+        // The Names list shows every name; content names are edited under Content
+        // and only shown read-only here.
         let standalone = |name: &&Name| {
-            target_is_content(&name.target) == content
-                && !matches!(&name.target, NameTarget::Job(id) if self.jobs.contains_key(id))
+            !content
+                || (target_is_content(&name.target)
+                    && !matches!(&name.target, NameTarget::Job(id) if self.jobs.contains_key(id)))
         };
         let names: Vec<_> = self.names.values().filter(standalone).cloned().collect();
         if content && names.is_empty() {
@@ -1018,7 +1018,7 @@ impl App {
                             &[("Name", 440.0), ("DNS records", 560.0), ("Actions", 300.0)],
                         );
                         for name in &names {
-                            if self.editing_name && self.name_label == name.label {
+                            if self.editing_name && self.name_editor_content == content && self.name_label == name.label {
                                 table_cell(ui, 440.0, 100.0, |ui| name_link(ui, name, None));
                                 table_cell(ui, 560.0, 100.0, |ui| {
                                     dns_editor(ui, &name.label, &mut self.name_url);
@@ -1029,10 +1029,9 @@ impl App {
                                 ui.end_row();
                                 continue;
                             }
+                            let managed = !content && target_is_content(&name.target);
                             table_cell(ui, 440.0, 24.0, |ui| name_link(ui, name, None));
-                            table_text(
-                                ui,
-                                match &name.target {
+                            let records = match &name.target {
                                     NameTarget::Url(url) => url.to_string(),
                                     NameTarget::Records(text) => text.clone(),
                                     NameTarget::Job(id) => self
@@ -1040,9 +1039,18 @@ impl App {
                                         .get(id)
                                         .map(|j| format!("Following {}", job_path(j).display()))
                                         .unwrap_or_else(|| "Linked data is unavailable".into()),
-                                },
-                                280.0,
-                            );
+                            };
+                            table_cell(ui, 560.0, 24.0, |ui| {
+                                row_line(ui, |ui| {
+                                    let text = if managed {
+                                        egui::RichText::new(&records).weak()
+                                    } else {
+                                        egui::RichText::new(&records)
+                                    };
+                                    ui.add(egui::Label::new(text).truncate())
+                                        .on_hover_text(&records);
+                                });
+                            });
                             table_cell(ui, 300.0, 24.0, |ui| {
                                 ui.push_id(&name.label, |ui| {
                                     ui.add_enabled_ui(self.ready && !self.busy, |ui| {
@@ -1050,7 +1058,13 @@ impl App {
                                             egui::vec2(300.0, 24.0),
                                             egui::Layout::left_to_right(egui::Align::Center),
                                             |ui| {
-                                                if ui.button("Edit").clicked() {
+                                                const MANAGED: &str =
+                                                    "Belongs to content; manage it under Content";
+                                                if ui
+                                                    .add_enabled(!managed, egui::Button::new("Edit"))
+                                                    .on_disabled_hover_text(MANAGED)
+                                                    .clicked()
+                                                {
                                                     self.editing_name = true;
                                                     self.name_editor_open = true;
                                                     self.name_editor_content = content;
@@ -1090,7 +1104,12 @@ impl App {
                                                         let _ = tx.send(LocalUpdate::ExportName(label, path));
                                                     });
                                                 }
-                                                if icon_button(ui, Icon::Trash, "Remove name…")
+                                                if ui
+                                                    .add_enabled_ui(!managed, |ui| {
+                                                        icon_button(ui, Icon::Trash, "Remove name…")
+                                                            .on_disabled_hover_text(MANAGED)
+                                                    })
+                                                    .inner
                                                     .clicked()
                                                 {
                                                     self.removal =
@@ -1540,28 +1559,42 @@ fn table_text(ui: &mut egui::Ui, text: String, width: f32) {
 }
 /// The compact label copies the full value; opening is always explicit.
 fn copy_value(ui: &mut egui::Ui, value: &str, label: &str, kind: &str) -> bool {
+    copy_button(ui, value, kind, |copied| {
+        egui::Button::new(egui::RichText::new(if copied { "Copied!" } else { label }).monospace())
+            .truncate()
+            .frame(false)
+            .min_size(egui::vec2(0.0, 24.0))
+    })
+    .on_hover_text(format!("Click to copy {kind}"))
+    .clicked()
+}
+/// A labelled button, so it is not confused with the URL copy icon next to it.
+fn copy_ticket(ui: &mut egui::Ui, ticket: &str) {
+    copy_button(ui, ticket, "ticket", |copied| {
+        egui::Button::new(if copied { "Copied!" } else { "Ticket" }).min_size(egui::vec2(0.0, 24.0))
+    })
+    .on_hover_text("Copy ticket (hash and provider address, for iroh clients)");
+}
+/// Copies `value` on click and shows "Copied!" for two seconds.
+fn copy_button(
+    ui: &mut egui::Ui,
+    value: &str,
+    kind: &str,
+    button: impl FnOnce(bool) -> egui::Button<'static>,
+) -> egui::Response {
     let id = ui.id().with(("copied", kind, value));
     let now = ui.input(|i| i.time);
     let copied = ui
         .ctx()
         .data(|d| d.get_temp::<f64>(id))
         .is_some_and(|until| now < until);
-    let response = ui
-        .add(
-            egui::Button::new(
-                egui::RichText::new(if copied { "Copied!" } else { label }).monospace(),
-            )
-            .truncate()
-            .frame(false)
-            .min_size(egui::vec2(0.0, 24.0)),
-        )
-        .on_hover_text(format!("Click to copy {kind}\n{value}"));
+    let response = ui.add(button(copied));
     if response.clicked() {
         ui.ctx().copy_text(value.to_owned());
         ui.ctx().data_mut(|d| d.insert_temp(id, now + 2.0));
         ui.ctx().request_repaint_after(Duration::from_secs(2));
     }
-    response.clicked()
+    response
 }
 
 #[derive(Clone, Copy)]
@@ -1634,19 +1667,12 @@ fn link_contents(ui: &mut egui::Ui, url: &str) {
             copy_value(ui, url, &compact_url(url), "URL");
         },
     );
-    if icon_button(ui, Icon::Copy, "Copy URL")
-        .on_hover_text(url)
-        .clicked()
-    {
+    if icon_button(ui, Icon::Copy, "Copy URL").clicked() {
         ui.ctx().copy_text(url.to_owned());
     }
     if icon_button(ui, Icon::Open, "Open URL in browser").clicked() {
         ui.ctx().open_url(egui::OpenUrl::new_tab(url));
     }
-}
-
-fn link(ui: &mut egui::Ui, url: String) {
-    row_line(ui, |ui| link_contents(ui, &url));
 }
 
 fn name_link(ui: &mut egui::Ui, name: &Name, remove: Option<bool>) -> bool {
