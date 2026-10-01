@@ -300,8 +300,9 @@ directory. Its default directory is selected using `dirs::config_dir()`:
 - Windows: `%APPDATA%\iroh-share-tui`.
 
 Use `--config-dir` to override it. It contains `control-client.key` and `client.json`
-(the saved daemon identity and address hints). Keys are created atomically with mode
-0600 on Unix. The pairing secret is not saved by the TUI.
+(every paired daemon with its address hints and optional name, plus the one used
+most recently). Keys are created atomically with mode 0600 on Unix. The pairing
+secret is not saved by the TUI. One client identity is used for all daemons.
 
 On its first startup, `iroh-share daemon` prints a ready-to-run command:
 
@@ -314,7 +315,15 @@ It uses `iroh-tickets` with the `iroh-share` prefix and a versioned postcard pay
 You can also launch `iroh-share-tui` without arguments and paste the ticket at its
 first-run prompt. The TUI creates its own persistent identity, redeems the ticket,
 saves the connection, and opens the interface without another setup step.
-Subsequent launches only need `iroh-share-tui`.
+Subsequent launches only need `iroh-share-tui`; it reconnects to the daemon used
+most recently.
+
+The TUI can manage several daemons. Press **m** to open the Daemons page: Enter
+switches to the selected daemon, **a** adds one by pasting its pairing ticket,
+**n** names it, and **x** forgets it. Forgetting only removes the daemon from this
+list; it keeps the TUI authorized until revoked with `iroh-share control revoke`.
+The heading shows which daemon is current.
+
 To create additional tickets while the daemon is running:
 
 ```sh
@@ -352,8 +361,13 @@ The daemon writes `control.addr` for local CLI discovery.
 
 Run `cargo run -p iroh-share-gui --release`. Paste the daemon's one-time ticket
 into the connection screen, or pass it as a positional argument. The GUI keeps
-its own identity and saved daemon address in the platform configuration directory
+its own identity and saved daemons in the platform configuration directory
 under `iroh-share-gui`; `--config-dir` overrides it.
+
+The GUI can manage several daemons. The **Daemon** menu at the top switches
+between saved daemons and adds another with its pairing ticket and an optional
+name. On start, the GUI reconnects to the daemon used most recently. Settings can
+rename the current daemon or forget it; forgetting removes it from this list only.
 
 Data is the publishing screen, with content-linked names alongside it. Standalone
 URL names and ordinary downloads are collapsed sections. Settings contains gateway
@@ -361,7 +375,7 @@ configuration. Public links and sendme tickets have copy actions.
 Use **Complete** for paths on the daemon. When both apps share a filesystem,
 enable **The daemon is on this computer** in Settings to choose folders, share
 files/folders by dropping them into the window, and open seeded paths in the
-system file manager. Closing the GUI leaves the daemon and gateway running.
+system file manager. This setting is saved separately for each daemon. Closing the GUI leaves the daemon and gateway running.
 
 Frontend capabilities and protocol behavior are described in
 [the UI capability guide](iroh-share-proto/UI.md) and

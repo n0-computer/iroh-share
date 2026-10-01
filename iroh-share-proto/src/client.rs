@@ -375,61 +375,195 @@ pub fn load_or_create_key(path: &Path) -> Result<SecretKey> {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ClientConfig {
+    /// The daemon used most recently, which clients connect to on start.
     endpoint: crate::EndpointId,
     #[serde(default)]
     addr: Option<EndpointAddr>,
+    /// Every paired daemon, including the current one. Older files omit it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    daemons: Vec<SavedDaemon>,
 }
-pub fn configured_endpoint(root: &Path) -> Result<Option<crate::EndpointId>> {
-    Ok(configured_address(root)?.map(|addr| addr.id))
+
+/// A daemon this client has paired with.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SavedDaemon {
+    pub addr: EndpointAddr,
+    /// Optional label chosen by the user; clients fall back to the endpoint ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
-pub fn configured_address(root: &Path) -> Result<Option<EndpointAddr>> {
+
+impl SavedDaemon {
+    pub fn id(&self) -> crate::EndpointId {
+        self.addr.id
+    }
+    /// The user's label, or a shortened endpoint ID.
+    pub fn display_name(&self) -> String {
+        match &self.name {
+            Some(name) => name.clone(),
+            None => self.addr.id.fmt_short().to_string(),
+        }
+    }
+}
+
+fn read_config(root: &Path) -> Result<Option<ClientConfig>> {
     match std::fs::read(root.join("client.json")) {
         Ok(bytes) => {
-            let config: ClientConfig = serde_json::from_slice(&bytes)?;
-            let addr = config.addr.unwrap_or_else(|| config.endpoint.into());
+            let mut config: ClientConfig = serde_json::from_slice(&bytes)?;
+            let addr = config
+                .addr
+                .clone()
+                .unwrap_or_else(|| config.endpoint.into());
             anyhow::ensure!(
                 addr.id == config.endpoint,
                 "configured endpoint does not match address"
             );
-            Ok(Some(addr))
+            if !config.daemons.iter().any(|d| d.id() == addr.id) {
+                config.daemons.insert(0, SavedDaemon { addr, name: None });
+            }
+            Ok(Some(config))
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error.into()),
     }
 }
-pub fn configure_endpoint(root: &Path, endpoint: Option<crate::EndpointId>) -> Result<()> {
-    configure_address(root, endpoint.map(EndpointAddr::from))
-}
-pub fn configure_address(root: &Path, addr: Option<EndpointAddr>) -> Result<()> {
+
+fn write_config(root: &Path, config: Option<&ClientConfig>) -> Result<()> {
     std::fs::create_dir_all(root)?;
     let path = root.join("client.json");
-    if let Some(addr) = addr {
-        let temporary = root.join(format!("client.{}.tmp", rand::random::<u64>()));
-        let result = (|| -> Result<()> {
-            use std::io::Write;
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&temporary)?;
-            file.write_all(&serde_json::to_vec_pretty(&ClientConfig {
-                endpoint: addr.id,
-                addr: Some(addr),
-            })?)?;
-            file.sync_all()?;
-            std::fs::rename(&temporary, path)?;
-            Ok(())
-        })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(temporary);
-        }
-        result
-    } else {
-        match std::fs::remove_file(path) {
+    let Some(config) = config else {
+        return match std::fs::remove_file(path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error.into()),
-        }
+        };
+    };
+    let temporary = root.join(format!("client.{}.tmp", rand::random::<u64>()));
+    let result = (|| -> Result<()> {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(&serde_json::to_vec_pretty(config)?)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(temporary);
     }
+    result
+}
+
+pub fn configured_endpoint(root: &Path) -> Result<Option<crate::EndpointId>> {
+    Ok(configured_address(root)?.map(|addr| addr.id))
+}
+pub fn configured_address(root: &Path) -> Result<Option<EndpointAddr>> {
+    Ok(read_config(root)?.map(|config| {
+        config
+            .daemons
+            .into_iter()
+            .find(|d| d.id() == config.endpoint)
+            .expect("current daemon is listed")
+            .addr
+    }))
+}
+pub fn configure_endpoint(root: &Path, endpoint: Option<crate::EndpointId>) -> Result<()> {
+    configure_address(root, endpoint.map(EndpointAddr::from))
+}
+/// Make `addr` the current daemon, adding it to the saved list if needed.
+///
+/// `None` forgets every saved daemon.
+pub fn configure_address(root: &Path, addr: Option<EndpointAddr>) -> Result<()> {
+    let Some(addr) = addr else {
+        return write_config(root, None);
+    };
+    let mut daemons = read_config(root)?
+        .map(|config| config.daemons)
+        .unwrap_or_default();
+    match daemons.iter_mut().find(|d| d.id() == addr.id) {
+        // A bare endpoint ID must not discard address hints learned from a ticket.
+        Some(_) if addr.is_empty() => {}
+        Some(saved) => saved.addr = addr.clone(),
+        None => daemons.push(SavedDaemon {
+            addr: addr.clone(),
+            name: None,
+        }),
+    }
+    let addr = daemons
+        .iter()
+        .find(|d| d.id() == addr.id)
+        .expect("just added")
+        .addr
+        .clone();
+    write_config(
+        root,
+        Some(&ClientConfig {
+            endpoint: addr.id,
+            addr: Some(addr),
+            daemons,
+        }),
+    )
+}
+
+/// Every daemon this client has paired with, in the order they were added.
+pub fn saved_daemons(root: &Path) -> Result<Vec<SavedDaemon>> {
+    Ok(read_config(root)?
+        .map(|config| config.daemons)
+        .unwrap_or_default())
+}
+
+/// Switch to a saved daemon; clients connect to it from now on.
+pub fn select_daemon(root: &Path, id: crate::EndpointId) -> Result<()> {
+    let config = read_config(root)?.context("no daemons are saved")?;
+    let addr = config
+        .daemons
+        .iter()
+        .find(|d| d.id() == id)
+        .context("this daemon is not saved")?
+        .addr
+        .clone();
+    configure_address(root, Some(addr))
+}
+
+/// Set or clear a saved daemon's label.
+pub fn rename_daemon(root: &Path, id: crate::EndpointId, name: Option<String>) -> Result<()> {
+    let mut config = read_config(root)?.context("no daemons are saved")?;
+    let saved = config
+        .daemons
+        .iter_mut()
+        .find(|d| d.id() == id)
+        .context("this daemon is not saved")?;
+    saved.name = name
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty());
+    write_config(root, Some(&config))
+}
+
+/// Remove a saved daemon. If it was current, the first remaining daemon becomes
+/// current, which is returned; `None` means no daemons are left.
+///
+/// The daemon keeps this client authorized; pairing again needs a new ticket.
+pub fn forget_daemon(root: &Path, id: crate::EndpointId) -> Result<Option<crate::EndpointId>> {
+    let Some(mut config) = read_config(root)? else {
+        return Ok(None);
+    };
+    config.daemons.retain(|d| d.id() != id);
+    let Some(current) = config
+        .daemons
+        .iter()
+        .find(|d| d.id() == config.endpoint)
+        .or_else(|| config.daemons.first())
+        .cloned()
+    else {
+        write_config(root, None)?;
+        return Ok(None);
+    };
+    config.endpoint = current.id();
+    config.addr = Some(current.addr);
+    write_config(root, Some(&config))?;
+    Ok(Some(config.endpoint))
 }
 
 /// Redeem over an authenticated connection; the server sees this endpoint's identity.
@@ -498,6 +632,51 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(path)?.permissions().mode() & 0o777, 0o600);
         }
+        Ok(())
+    }
+    #[test]
+    fn saved_daemons_switch_rename_and_forget() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let id = |n: u8| SecretKey::from_bytes(&[n; 32]).public();
+        let (a, b) = (id(1), id(2));
+        // Files from before the list existed read as one saved daemon, unchanged.
+        let legacy = serde_json::to_vec_pretty(&serde_json::json!({ "endpoint": a }))?;
+        std::fs::write(root.path().join("client.json"), &legacy)?;
+        let daemons = saved_daemons(root.path())?;
+        assert_eq!(daemons.len(), 1);
+        assert_eq!(daemons[0].id(), a);
+        assert_eq!(std::fs::read(root.path().join("client.json"))?, legacy);
+
+        let hinted = EndpointAddr::new(b).with_ip_addr("127.0.0.1:4433".parse()?);
+        configure_address(root.path(), Some(hinted.clone()))?;
+        assert_eq!(configured_endpoint(root.path())?, Some(b));
+        // Selecting by bare ID keeps the address hints from pairing.
+        configure_endpoint(root.path(), Some(b))?;
+        assert_eq!(configured_address(root.path())?, Some(hinted.clone()));
+        select_daemon(root.path(), a)?;
+        assert_eq!(configured_endpoint(root.path())?, Some(a));
+        assert!(select_daemon(root.path(), id(3)).is_err());
+
+        rename_daemon(root.path(), b, Some("  nas  ".into()))?;
+        let daemons = saved_daemons(root.path())?;
+        assert_eq!(
+            daemons.iter().map(SavedDaemon::id).collect::<Vec<_>>(),
+            [a, b]
+        );
+        assert_eq!(daemons[1].display_name(), "nas");
+        assert_eq!(daemons[1].addr, hinted);
+        rename_daemon(root.path(), b, Some(" ".into()))?;
+        assert_eq!(saved_daemons(root.path())?[1].name, None);
+
+        // Forgetting another daemon keeps the current one.
+        assert_eq!(forget_daemon(root.path(), b)?, Some(a));
+        configure_address(root.path(), Some(hinted))?;
+        // Forgetting the current daemon switches to one that remains.
+        assert_eq!(forget_daemon(root.path(), b)?, Some(a));
+        assert_eq!(configured_endpoint(root.path())?, Some(a));
+        assert_eq!(forget_daemon(root.path(), a)?, None);
+        assert!(saved_daemons(root.path())?.is_empty());
+        assert!(!root.path().join("client.json").exists());
         Ok(())
     }
     #[test]

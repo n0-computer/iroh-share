@@ -17,6 +17,14 @@ A `PairingTicket` contains the daemon's endpoint address and a one-time secret.
 Accept it through a paste field or command-line argument, redeem it with
 `client::pair`, and then connect using `ControlClient::connect_configured`.
 Pairing enrolls the client's authenticated endpoint ID and saves the daemon address.
+
+A client can be paired with several daemons using one identity. `client::pair` adds
+the daemon to the saved list and makes it current. `saved_daemons`, `select_daemon`,
+`rename_daemon`, and `forget_daemon` manage the list; `connect_configured` always
+connects to the current daemon, which is the one used most recently. When switching,
+discard the previous daemon's state, queued commands, and per-daemon preferences
+such as same-filesystem access, as after a reconnect. Forgetting a daemon is local:
+the daemon keeps the client authorized until it is revoked.
 Do not log or persist the ticket. Display parse, connection, and redemption failures
 without discarding the user's ability to retry. Multiple invitations can coexist;
 each enrolls one client. Invitations expire when the daemon restarts, while grants
