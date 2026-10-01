@@ -16,9 +16,10 @@ case "$1" in
         running && exit 0
         mkdir -p "$VAR"
         [ -f "$LOG" ] && mv -f "$LOG" "$VAR/daemon.previous.log"
-        # Put RUST_LOG filters in $VAR/rust_log to debug, e.g.
-        # info,iroh_blobs::provider=debug
-        RUST_LOG=info
+        # The provider at debug logs each request and why it failed; peers
+        # only see an error code. Override with a RUST_LOG value in
+        # $VAR/rust_log.
+        RUST_LOG=info,iroh_blobs::provider=debug
         [ -f "$VAR/rust_log" ] && RUST_LOG=$(cat "$VAR/rust_log")
         # Ticket imports default to $HOME/Downloads/Iroh Share.
         HOME=$VAR RUST_LOG=$RUST_LOG nohup "$CLI" daemon --no-pairing-ticket >> "$LOG" 2>&1 &
