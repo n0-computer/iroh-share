@@ -1,4 +1,4 @@
-Blobtorrent runs in the background for your Windows account.
+Iroh Share runs in the background for your Windows account.
 
 Setup installs the desktop app, command-line tools, and background daemon under your local profile. It starts the daemon now and at each login, and connects a new desktop app configuration automatically. No administrator access is required.
 

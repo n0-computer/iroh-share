@@ -1,0 +1,44 @@
+[package]
+name = "iroh-share-proto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+iroh-tickets = "1"
+postcard = { version = "1", features = ["alloc"] }
+subtle = "2"
+url.workspace = true
+z32.workspace = true
+serde.workspace = true
+iroh-blobs.workspace = true
+irpc.workspace = true
+iroh.workspace = true
+
+[features]
+default = []
+client = ["dep:anyhow", "dep:dirs", "dep:tokio", "dep:irpc-iroh", "dep:serde_json", "dep:rand"]
+
+[dependencies.anyhow]
+workspace = true
+optional = true
+[dependencies.dirs]
+workspace = true
+optional = true
+[dependencies.tokio]
+workspace = true
+optional = true
+
+[dependencies.irpc-iroh]
+workspace = true
+optional = true
+[dependencies.serde_json]
+workspace = true
+optional = true
+[dependencies.rand]
+workspace = true
+optional = true
+
+[dev-dependencies]
+tempfile.workspace = true
+serde_json.workspace = true

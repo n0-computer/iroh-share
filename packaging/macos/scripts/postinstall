@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 if [ "$(id -u)" -eq 0 ]; then
-    echo 'Install Blobtorrent for your own user account, without sudo.' >&2
+    echo 'Install Iroh Share for your own user account, without sudo.' >&2
     exit 1
 fi
-"$HOME/Applications/Blobtorrent.app/Contents/MacOS/blobtorrent-background" install-agent
+"$HOME/Applications/Iroh Share.app/Contents/MacOS/iroh-share-background" install-agent

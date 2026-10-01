@@ -9,10 +9,10 @@ if os.environ.get("CI") != "true":
 root = pathlib.Path(__file__).resolve().parents[2]
 package = next((root / "dist").glob("*-macos-arm64.pkg"))
 home = pathlib.Path.home()
-app = home / "Applications/Blobtorrent.app"
-state = home / "Library/Application Support/blobtorrent"
-config = home / "Library/Application Support/blobtorrent-gui"
-agent = home / "Library/LaunchAgents/computer.n0.blobtorrent.plist"
+app = home / "Applications/Iroh Share.app"
+state = home / "Library/Application Support/iroh-share"
+config = home / "Library/Application Support/iroh-share-gui"
+agent = home / "Library/LaunchAgents/computer.n0.iroh-share.plist"
 logs = root / "installer-test-logs"
 logs.mkdir(exist_ok=True)
 
@@ -23,7 +23,7 @@ def install(label):
     assert result.returncode == 0, result.stdout + result.stderr
 
 def cli(*args):
-    return subprocess.run([str(app / "Contents/MacOS/blobtorrent"), *map(str, args)],
+    return subprocess.run([str(app / "Contents/MacOS/iroh-share"), *map(str, args)],
                           check=True, capture_output=True, text=True, timeout=30).stdout
 
 try:
@@ -34,7 +34,7 @@ try:
     identity = (config / "control-client.key").read_bytes()
     connection = (config / "client.json").read_bytes()
     assert (config / "local-endpoint").is_file()
-    source = home / "blobtorrent-installer-test.txt"
+    source = home / "iroh-share-installer-test.txt"
     source.write_text("Installer lifecycle check")
     cli("share", source)
     deadline = time.monotonic() + 30
@@ -45,7 +45,7 @@ try:
     assert (config / "control-client.key").read_bytes() == identity
     assert (config / "client.json").read_bytes() == connection
     assert "Seeding" in cli("list"), "Upgrade lost data"
-    result = subprocess.run(["/bin/sh", str(home / "Applications/Uninstall Blobtorrent.command"), "--yes"],
+    result = subprocess.run(["/bin/sh", str(home / "Applications/Uninstall Iroh Share.command"), "--yes"],
                             capture_output=True, text=True, timeout=90)
     (logs / "uninstall.log").write_text(result.stdout + result.stderr)
     assert result.returncode == 0, result.stdout + result.stderr

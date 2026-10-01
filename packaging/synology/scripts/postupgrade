@@ -1,0 +1,9 @@
+#!/bin/sh
+# Restores the data preupgrade moved aside on DSM 6.
+TARGET=/var/packages/iroh-share/target
+BACKUP="$(readlink -f "$TARGET")-var-backup"
+if [ -d "$BACKUP" ]; then
+    rm -rf "$TARGET/var"
+    mv "$BACKUP" "$TARGET/var"
+fi
+exit 0

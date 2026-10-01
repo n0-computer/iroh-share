@@ -1,0 +1,17 @@
+[Unit]
+Description=Iroh Share daemon
+
+[Service]
+Type=simple
+ExecStart=%h/.cargo/bin/iroh-share daemon --no-pairing-ticket
+WorkingDirectory=%h
+Environment=RUST_LOG=warn,iroh_share=info
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

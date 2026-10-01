@@ -1,0 +1,43 @@
+[package]
+default-run = "iroh-share"
+name = "iroh-share"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+hickory-proto = { version = "0.25", default-features = false, features = ["text-parsing"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+dirs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+url.workspace = true
+simple-dns.workspace = true
+z32.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+irpc.workspace = true
+irpc-iroh.workspace = true
+rand.workspace = true
+hex.workspace = true
+tokio.workspace = true
+iroh.workspace = true
+iroh-blobs.workspace = true
+n0-future.workspace = true
+walkdir.workspace = true
+blake3.workspace = true
+iroh-mainline-endpoint-discovery.workspace = true
+iroh-local-gateway.workspace = true
+n0-mainline.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+iroh-share-proto = { workspace = true, features = ["client"] }
+
+[dev-dependencies]
+pkarr = { version = "3.10", default-features = false, features = ["signed_packet"] }
+udp-addr-index = { git = "https://github.com/n0-computer/iroh-content-discovery.git", rev = "62b399fa39c710b6f3981273dc4a4153c6ac4811" }
+bao-tree = "0.16"
+tempfile.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+plist = "1"
