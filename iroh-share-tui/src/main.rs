@@ -1,4 +1,5 @@
 mod completion;
+mod daemons;
 mod links;
 mod model;
 mod network;
@@ -74,6 +75,11 @@ struct App {
     model: Model,
     names_view: bool,
     settings: settings::Page,
+    daemons: daemons::Page,
+    config_dir: PathBuf,
+    /// The current daemon changed; the network worker must restart.
+    reconnect: bool,
+    pair_request: Option<iroh_share_proto::PairingTicket>,
     client_id: Option<iroh_share_proto::EndpointId>,
     server_id: Option<iroh_share_proto::EndpointId>,
     link_action: Option<links::Action>,
@@ -128,21 +134,11 @@ impl App {
                 }
             }
             Update::Connecting => {
-                self.model.reset();
-                self.import_directory = None;
-                self.pending_input = None;
-                self.input = Input::Browse;
-                self.completion.reset();
-                self.busy = false;
+                self.reset_session();
                 self.status = "Connecting to daemon...".into();
             }
             Update::Disconnected(error) => {
-                self.model.reset();
-                self.import_directory = None;
-                self.pending_input = None;
-                self.input = Input::Browse;
-                self.completion.reset();
-                self.busy = false;
+                self.reset_session();
                 self.status = format!("Disconnected: {error}. Retrying...");
             }
             Update::Event(event) => {
@@ -168,6 +164,88 @@ impl App {
                 }
             }
         }
+    }
+
+    fn reset_session(&mut self) {
+        self.model.reset();
+        self.import_directory = None;
+        self.pending_input = None;
+        self.input = Input::Browse;
+        self.completion.reset();
+        self.busy = false;
+    }
+
+    /// Reloads the saved daemons after the current one changed and reconnects.
+    fn daemon_changed(&mut self, current: Option<iroh_share_proto::EndpointId>) {
+        let daemons = iroh_share_proto::client::saved_daemons(&self.config_dir).unwrap_or_default();
+        self.daemons.load(daemons, current);
+        self.server_id = current;
+        self.reconnect = true;
+        self.reset_session();
+        self.settings = settings::Page::default();
+        self.names_view = false;
+        match current {
+            Some(_) => self.daemons.open = false,
+            None => {
+                self.daemons.add();
+                self.status = "No daemons left. Paste a pairing ticket to add one.".into();
+            }
+        }
+    }
+
+    fn paired(&mut self, result: Result<iroh_share_proto::EndpointId, String>) {
+        self.daemons.pairing = false;
+        match result {
+            Ok(id) => {
+                self.daemons.status = "Daemon added. Press n to name it.".into();
+                self.daemon_changed(Some(id));
+            }
+            Err(error) => self.daemons.status = format!("Pairing failed: {error}"),
+        }
+    }
+
+    fn daemon_key(&mut self, key: KeyEvent) -> bool {
+        let config = self.config_dir.clone();
+        match self.daemons.key(key) {
+            daemons::Action::None => {}
+            daemons::Action::Back => self.daemons.open = false,
+            daemons::Action::Quit => return true,
+            daemons::Action::Switch(id) => {
+                match iroh_share_proto::client::select_daemon(&config, id) {
+                    Ok(()) => self.daemon_changed(Some(id)),
+                    Err(error) => self.daemons.status = format!("{error:#}"),
+                }
+            }
+            daemons::Action::Pair(ticket) => self.pair_request = Some(ticket),
+            daemons::Action::Rename(id, name) => {
+                match iroh_share_proto::client::rename_daemon(&config, id, Some(name)) {
+                    Ok(()) => {
+                        let current = self.daemons.current;
+                        let daemons =
+                            iroh_share_proto::client::saved_daemons(&config).unwrap_or_default();
+                        self.daemons.load(daemons, current);
+                        self.daemons.status = "Name saved".into();
+                    }
+                    Err(error) => self.daemons.status = format!("{error:#}"),
+                }
+            }
+            daemons::Action::Forget(id) => {
+                match iroh_share_proto::client::forget_daemon(&config, id) {
+                    Ok(current) if current == self.daemons.current => {
+                        let daemons =
+                            iroh_share_proto::client::saved_daemons(&config).unwrap_or_default();
+                        self.daemons.load(daemons, current);
+                        self.daemons.status = "Daemon forgotten".into();
+                    }
+                    Ok(current) => {
+                        self.daemon_changed(current);
+                        self.daemons.status = "Daemon forgotten".into();
+                    }
+                    Err(error) => self.daemons.status = format!("{error:#}"),
+                }
+            }
+        }
+        false
     }
 
     fn submit(&mut self, action: Action, tx: &mpsc::Sender<Action>) {
@@ -196,6 +274,17 @@ impl App {
         }
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             return true;
+        }
+        if self.daemons.open {
+            return self.daemon_key(key);
+        }
+        if matches!(self.input, Input::Browse)
+            && key.code == KeyCode::Char('m')
+            && key.modifiers.is_empty()
+            && !self.settings.open
+        {
+            self.daemons.open = true;
+            return false;
         }
         if matches!(self.input, Input::Browse)
             && (key.code == KeyCode::F(2) || key.code == KeyCode::Char(','))
@@ -493,6 +582,10 @@ impl App {
     }
 
     fn paste(&mut self, text: String) {
+        if self.daemons.open {
+            self.daemons.paste(text);
+            return;
+        }
         if self.settings.open {
             self.settings.paste(text);
             return;
@@ -639,6 +732,10 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
+        if self.daemons.open {
+            self.daemons.draw(frame);
+            return;
+        }
         if self.settings.open {
             self.settings.draw(frame, self.model.ready);
             return;
@@ -658,7 +755,12 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 "iroh-share ".bold().cyan(),
-                format!("  {connection} · {} items", self.model.jobs.len()).into(),
+                format!(
+                    "  {} · {connection} · {} items",
+                    clean(&self.daemons.current_name().unwrap_or_default()),
+                    self.model.jobs.len()
+                )
+                .into(),
             ])),
             heading,
         );
@@ -815,7 +917,7 @@ impl App {
         );
         frame.render_widget(
             Paragraph::new(format!(
-                "Tab {} · , Settings · N Names {} · D Downloads {}{} · q Quit",
+                "Tab {} · , Settings · m Daemons · N Names {} · D Downloads {}{} · q Quit",
                 if self.names_view {
                     "Settings"
                 } else {
@@ -918,6 +1020,7 @@ fn name_status(state: &iroh_share_proto::NameState) -> &'static str {
     match state {
         Disabled => "Disabled",
         WaitingForJob => "Waiting for data",
+        NoRecords => "No records yet",
         Publishing { .. } | PublishingRecords => "Publishing",
         Published { .. } | PublishedRecords { .. } => "Published",
         Failed { .. } => "Failed",
@@ -1083,9 +1186,16 @@ async fn main() -> Result<()> {
 }
 
 async fn run(terminal: &mut ratatui::DefaultTerminal, config_dir: PathBuf) -> Result<()> {
-    let (actions_tx, actions_rx) = mpsc::channel(8);
+    let (mut actions_tx, actions_rx) = mpsc::channel(8);
     let (updates_tx, mut updates_rx) = mpsc::channel(256);
-    let worker = tokio::spawn(network::run(config_dir.clone(), actions_rx, updates_tx));
+    let mut worker = Some(tokio::spawn(network::run(
+        config_dir.clone(),
+        actions_rx,
+        updates_tx,
+    )));
+    // Holds the update channel open while no daemon is saved and no worker runs.
+    let mut idle_updates = None;
+    let (paired_tx, mut paired_rx) = mpsc::channel(1);
     let mut events = EventStream::new();
     let server_id = iroh_share_proto::client::configured_endpoint(&config_dir)?;
     let mut app = App {
@@ -1094,8 +1204,13 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, config_dir: PathBuf) -> Re
                 .public(),
         ),
         server_id,
+        config_dir: config_dir.clone(),
         ..Default::default()
     };
+    app.daemons.load(
+        iroh_share_proto::client::saved_daemons(&config_dir)?,
+        server_id,
+    );
     let (link_tx, mut link_results) = links::worker();
     let mut tick = tokio::time::interval(Duration::from_millis(100));
     let result = async {
@@ -1104,6 +1219,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, config_dir: PathBuf) -> Re
                 _ = tick.tick() => { terminal.draw(|frame| app.draw(frame))?;
                     if terminal.size()?.height > 1 { links::draw_link(links::selected_url(&app.model, app.names_view).filter(|_| !app.settings.open).as_ref(), terminal.size()?.width)?; } }
                 Some(outcome) = link_results.recv() => { app.status = links::complete(outcome); }
+                Some(result) = paired_rx.recv() => app.paired(result),
                 update = updates_rx.recv() => { app.update(update.context("connection worker stopped")?); }
                 event = events.next() => match event.context("terminal input closed")?? {
                     Event::Key(key) => if app.key(key, &actions_tx) { return Ok(()); },
@@ -1118,10 +1234,41 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, config_dir: PathBuf) -> Re
                     app.status = "Clipboard/browser action queue is busy".into();
                 }
             }
+            if let Some(ticket) = app.pair_request.take() {
+                let config_dir = config_dir.clone();
+                let paired_tx = paired_tx.clone();
+                tokio::spawn(async move {
+                    let id = ticket.addr.id;
+                    let result = iroh_share_proto::client::pair(&config_dir, &ticket)
+                        .await
+                        .map(|()| id)
+                        .map_err(|error| format!("{error:#}"));
+                    let _ = paired_tx.send(result).await;
+                });
+            }
+            if std::mem::take(&mut app.reconnect) {
+                if let Some(worker) = worker.take() {
+                    worker.abort();
+                }
+                // Fresh channels drop updates and commands meant for the previous daemon.
+                let (tx, rx) = mpsc::channel(8);
+                let (updates, receiver) = mpsc::channel(256);
+                actions_tx = tx;
+                updates_rx = receiver;
+                if app.daemons.current.is_some() {
+                    idle_updates = None;
+                    worker = Some(tokio::spawn(network::run(config_dir.clone(), rx, updates)));
+                } else {
+                    idle_updates = Some(updates);
+                }
+            }
         }
     }.await;
-    worker.abort();
-    let _ = worker.await;
+    drop(idle_updates);
+    if let Some(worker) = worker {
+        worker.abort();
+        let _ = worker.await;
+    }
     result
 }
 

@@ -17,6 +17,14 @@ A `PairingTicket` contains the daemon's endpoint address and a one-time secret.
 Accept it through a paste field or command-line argument, redeem it with
 `client::pair`, and then connect using `ControlClient::connect_configured`.
 Pairing enrolls the client's authenticated endpoint ID and saves the daemon address.
+
+A client can be paired with several daemons using one identity. `client::pair` adds
+the daemon to the saved list and makes it current. `saved_daemons`, `select_daemon`,
+`rename_daemon`, and `forget_daemon` manage the list; `connect_configured` always
+connects to the current daemon, which is the one used most recently. When switching,
+discard the previous daemon's state, queued commands, and per-daemon preferences
+such as same-filesystem access, as after a reconnect. Forgetting a daemon is local:
+the daemon keeps the client authorized until it is revoked.
 Do not log or persist the ticket. Display parse, connection, and redemption failures
 without discarding the user's ability to retry. Multiple invitations can coexist;
 each enrolls one client. Invitations expire when the daemon restarts, while grants
@@ -232,9 +240,21 @@ an existing configured daemon and must never silently replace a remote connectio
 This authenticated operation exports every naming key,
 including names attached to content and keys without a record. Save the archive
 on the client computer; never include its bytes in logs or the Watch stream.
-Entries are `<public-key>/public-key.txt`, `private-key.hex`, and optional
-`record.pkarr`; the latter is public key + signature + big-endian 64-bit timestamp
+Entries are `<public-key>.key`, the raw 32-byte signing seed, and optional
+`<public-key>.pkarr`, which is public key + signature + big-endian 64-bit timestamp
 + DNS packet, the pkarr `SignedPacket::as_bytes` format.
+
+`ExportName { label }` returns a ZIP in the same layout containing only that
+name. Treat it like the full backup: it contains the private key.
+
+`ImportNames { archive }` restores names from either kind of archive and returns
+an `ImportedName` per key: `Imported { label }` or `Skipped { reason }`. The daemon
+validates the whole archive first and rejects it without changes if any key or
+record does not verify. Keys it already manages are skipped. Imported names are
+`NameTarget::Records` whose text is rendered from the imported packet; the packet
+itself is republished unchanged until edited. A key without a record gets empty
+records and the `NameState::NoRecords` state until records are set. Watch reports
+imported names as `NameUpdated`.
 
 `NameTarget::Records(String)` contains zone-style DNS records, one per line:
 `owner TTL IN TYPE value`. Owners are relative to the public key; @ is its root.

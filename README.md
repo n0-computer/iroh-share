@@ -300,8 +300,9 @@ directory. Its default directory is selected using `dirs::config_dir()`:
 - Windows: `%APPDATA%\iroh-share-tui`.
 
 Use `--config-dir` to override it. It contains `control-client.key` and `client.json`
-(the saved daemon identity and address hints). Keys are created atomically with mode
-0600 on Unix. The pairing secret is not saved by the TUI.
+(every paired daemon with its address hints and optional name, plus the one used
+most recently). Keys are created atomically with mode 0600 on Unix. The pairing
+secret is not saved by the TUI. One client identity is used for all daemons.
 
 On its first startup, `iroh-share daemon` prints a ready-to-run command:
 
@@ -314,7 +315,15 @@ It uses `iroh-tickets` with the `iroh-share` prefix and a versioned postcard pay
 You can also launch `iroh-share-tui` without arguments and paste the ticket at its
 first-run prompt. The TUI creates its own persistent identity, redeems the ticket,
 saves the connection, and opens the interface without another setup step.
-Subsequent launches only need `iroh-share-tui`.
+Subsequent launches only need `iroh-share-tui`; it reconnects to the daemon used
+most recently.
+
+The TUI can manage several daemons. Press **m** to open the Daemons page: Enter
+switches to the selected daemon, **a** adds one by pasting its pairing ticket,
+**n** names it, and **x** forgets it. Forgetting only removes the daemon from this
+list; it keeps the TUI authorized until revoked with `iroh-share control revoke`.
+The heading shows which daemon is current.
+
 To create additional tickets while the daemon is running:
 
 ```sh
@@ -352,8 +361,13 @@ The daemon writes `control.addr` for local CLI discovery.
 
 Run `cargo run -p iroh-share-gui --release`. Paste the daemon's one-time ticket
 into the connection screen, or pass it as a positional argument. The GUI keeps
-its own identity and saved daemon address in the platform configuration directory
+its own identity and saved daemons in the platform configuration directory
 under `iroh-share-gui`; `--config-dir` overrides it.
+
+The GUI can manage several daemons. The **Daemon** menu at the top switches
+between saved daemons and adds another with its pairing ticket and an optional
+name. On start, the GUI reconnects to the daemon used most recently. Settings can
+rename the current daemon or forget it; forgetting removes it from this list only.
 
 Data is the publishing screen, with content-linked names alongside it. Standalone
 URL names and ordinary downloads are collapsed sections. Settings contains gateway
@@ -361,7 +375,7 @@ configuration. Public links and sendme tickets have copy actions.
 Use **Complete** for paths on the daemon. When both apps share a filesystem,
 enable **The daemon is on this computer** in Settings to choose folders, share
 files/folders by dropping them into the window, and open seeded paths in the
-system file manager. Closing the GUI leaves the daemon and gateway running.
+system file manager. This setting is saved separately for each daemon. Closing the GUI leaves the daemon and gateway running.
 
 Frontend capabilities and protocol behavior are described in
 [the UI capability guide](iroh-share-proto/UI.md) and
@@ -445,12 +459,37 @@ panel's **Export all pkarr names…** action, or run:
 iroh-share names export pkarr-names.zip
 ```
 
-The ZIP is saved on the client computer. Each public-key directory contains
-`public-key.txt` (z-base-32), `private-key.hex` (32-byte Ed25519 signing seed),
-and `record.pkarr` (the current signed packet, if one exists). Aliases are not
-included. `record.pkarr` uses pkarr's `SignedPacket::as_bytes` format. The ZIP
-contains unencrypted private keys; export creates a new file without overwriting
-an existing file, with owner-only permissions on Unix.
+The ZIP is saved on the client computer. Files are named by the z-base-32 public
+key: `<key>.key` is the raw 32-byte Ed25519 signing seed, the same format as the
+gateway's `--key-file`, and `<key>.pkarr` is the current signed packet, if one
+exists. Aliases are not included. `.pkarr` files use pkarr's
+`SignedPacket::as_bytes` format, which is also how the gateway stores signed
+packets (`index-list.pkarr`). The ZIP contains unencrypted private keys; export
+creates a new file without overwriting an existing file, with owner-only
+permissions on Unix.
+
+To back up a single name, use **Export pkarr…** in that name's Actions, or run:
+
+```sh
+iroh-share names export-name <label> <key>.zip
+```
+
+This writes the same ZIP layout with just that name.
+
+Restore names with **Import pkarr names…** in the Names panel, or run:
+
+```sh
+iroh-share names import pkarr-names.zip
+```
+
+The whole archive is verified before anything is added: every key must match
+its file name, and every record must carry a valid signature for its key. Keys
+the daemon already manages are skipped, never overwritten. Imported names get
+labels like `imported-<key prefix>` and become advanced DNS names holding the
+imported records, which are republished unchanged until you edit them. A name
+that followed data on the old machine no longer follows anything. A key without
+a record is imported with no records and shows **No records yet**; it publishes
+once you add records.
 
 The Names panel also provides an advanced multiline DNS editor. Its default is
 an HTTPS alias record:

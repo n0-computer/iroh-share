@@ -5,6 +5,11 @@ use tokio::sync::mpsc;
 
 pub enum Action {
     ExportNames(PathBuf),
+    ExportName {
+        label: String,
+        path: PathBuf,
+    },
+    ImportNames(PathBuf),
     SetGateway(iroh_share_proto::GatewayConfig),
     CompletePath {
         id: u64,
@@ -143,6 +148,8 @@ async fn session(
                 let Some(action) = action else { return Ok(()); };
                 let result = match action {
                     Action::ExportNames(path) => client.export_names(&path).await.map(|()| format!("Exported pkarr names to {}", path.display())),
+                    Action::ExportName { label, path } => client.export_name(label, &path).await.map(|()| format!("Exported pkarr name to {}", path.display())),
+                    Action::ImportNames(path) => client.import_names(&path).await.map(|outcomes| import_summary(&outcomes)),
                     Action::SetGateway(config) => {
                         let client = client.clone();
                         settings_requests.spawn(async move {
@@ -214,5 +221,17 @@ async fn session(
                 tx.send(Update::ActionResult(match result { Ok(message) => message, Err(error) => format!("{error:#}") })).await?;
             }
         }
+    }
+}
+
+fn import_summary(outcomes: &[iroh_share_proto::ImportedName]) -> String {
+    let imported = outcomes
+        .iter()
+        .filter(|o| matches!(o.outcome, iroh_share_proto::ImportOutcome::Imported { .. }))
+        .count();
+    let skipped = outcomes.len() - imported;
+    match skipped {
+        0 => format!("Imported {imported} pkarr names"),
+        _ => format!("Imported {imported} pkarr names; skipped {skipped} already managed"),
     }
 }

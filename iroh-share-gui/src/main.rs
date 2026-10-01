@@ -6,7 +6,7 @@ use anyhow::Context as _;
 use clap::Parser;
 use eframe::egui;
 use iroh_share_proto::{
-    client, BlobTicket, DiscoveryMode, DownloadSource, GatewayConfig, GatewaySnapshot,
+    client, BlobTicket, DiscoveryMode, DownloadSource, EndpointId, GatewayConfig, GatewaySnapshot,
     GatewayState, Job, JobKind, JobState, Name, NameState, NameTarget, PairingTicket, WatchEvent,
 };
 use network::{Action, Update};
@@ -61,10 +61,13 @@ enum Page {
 enum Removal {
     Data(u64),
     Name(String),
+    Daemon(EndpointId),
 }
 enum LocalUpdate {
     ExportNames(Option<PathBuf>),
-    Paired(Result<(), String>),
+    ExportName(String, Option<PathBuf>),
+    ImportNames(Option<PathBuf>),
+    Paired(Result<EndpointId, String>),
     Picked(Option<PathBuf>),
     DownloadFolder(Option<PathBuf>),
     Opened(Result<(), String>),
@@ -118,6 +121,14 @@ struct App {
     gateway_index: String,
     gateway_dirty: bool,
     local_paths: bool,
+    /// Explicit same-filesystem choices per daemon; others follow the installer.
+    local_daemons: BTreeMap<EndpointId, bool>,
+    daemons: Vec<client::SavedDaemon>,
+    current: Option<EndpointId>,
+    /// Name for the daemon being added.
+    new_daemon_name: String,
+    /// Editable name of the current daemon.
+    daemon_name: String,
 }
 
 impl App {
@@ -127,18 +138,34 @@ impl App {
         config: PathBuf,
         ticket: Option<PairingTicket>,
     ) -> Self {
-        let local_paths = cc
+        let mut local_daemons: BTreeMap<EndpointId, bool> = cc
+            .storage
+            .and_then(|s| s.get_string("local_daemons"))
+            .unwrap_or_default()
+            .split_whitespace()
+            .filter_map(|entry| {
+                let (id, local) = entry.split_once('=')?;
+                Some((id.parse().ok()?, local == "true"))
+            })
+            .collect();
+        // Before multiple daemons, one setting applied to the only daemon.
+        if cc
             .storage
             .and_then(|s| s.get_string("local_paths"))
             .as_deref()
-            == Some("true");
-        Self::create(runtime, config, ticket, local_paths)
+            == Some("true")
+        {
+            if let Ok(Some(id)) = client::configured_endpoint(&config) {
+                local_daemons.entry(id).or_insert(true);
+            }
+        }
+        Self::create(runtime, config, ticket, local_daemons)
     }
     fn create(
         runtime: tokio::runtime::Runtime,
         config: PathBuf,
         ticket: Option<PairingTicket>,
-        local_paths: bool,
+        local_daemons: BTreeMap<EndpointId, bool>,
     ) -> Self {
         let (actions, _) = mpsc::channel(32);
         let (_, updates) = mpsc::channel(128);
@@ -150,11 +177,9 @@ impl App {
             .map(|e| format!("{e:#}"))
             .unwrap_or_default();
         let pairing = ticket.is_some() || !matches!(configured, Ok(Some(_)));
-        let installed_local = std::fs::read_to_string(config.join("local-endpoint"))
-            .ok()
-            .and_then(|id| id.trim().parse::<iroh_share_proto::EndpointId>().ok())
-            .is_some_and(|id| matches!(&configured, Ok(Some(server)) if *server == id));
-        let local_paths = (local_paths || installed_local) && ticket.is_none();
+        let has_ticket = ticket.is_some();
+        let daemons = client::saved_daemons(&config).unwrap_or_default();
+        let current = configured.ok().flatten();
         let mut app = Self {
             runtime,
             config,
@@ -203,8 +228,15 @@ impl App {
             gateway_listen: GatewayConfig::default().listen.to_string(),
             gateway_index: String::new(),
             gateway_dirty: false,
-            local_paths,
+            local_paths: false,
+            local_daemons,
+            daemons,
+            current,
+            new_daemon_name: String::new(),
+            daemon_name: String::new(),
         };
+        app.load_daemon(current);
+        app.local_paths &= !has_ticket;
         if !app.pairing {
             app.connect();
         }
@@ -233,14 +265,85 @@ impl App {
                 self.status = "Pairing…".into();
                 let config = self.config.clone();
                 let tx = self.local_tx.clone();
+                let name = Some(self.new_daemon_name.clone());
                 self.runtime.spawn(async move {
-                    let result = client::pair(&config, &ticket)
-                        .await
-                        .map_err(|e| format!("{e:#}"));
+                    let id = ticket.addr.id;
+                    let result = async {
+                        client::pair(&config, &ticket).await?;
+                        client::rename_daemon(&config, id, name)
+                    }
+                    .await
+                    .map(|()| id)
+                    .map_err(|e| format!("{e:#}"));
                     let _ = tx.send(LocalUpdate::Paired(result));
                 });
             }
             Err(e) => self.status = format!("Invalid pairing ticket: {e}"),
+        }
+    }
+    /// Drops everything that belongs to the daemon session.
+    fn clear_session(&mut self) {
+        self.ready = false;
+        self.busy = false;
+        self.jobs.clear();
+        self.names.clear();
+        self.selected = None;
+        self.import_open = false;
+        self.import_id = None;
+        self.import_directory = None;
+        self.import_source.clear();
+        self.editing_name = false;
+        self.name_editor_open = false;
+        self.name_label.clear();
+        self.completion_id += 1;
+        // Forgetting must stay possible while a daemon is unreachable.
+        if !matches!(self.removal, Some(Removal::Daemon(_))) {
+            self.removal = None;
+        }
+        self.candidates.clear();
+    }
+    fn is_local(&self, id: EndpointId) -> bool {
+        self.local_daemons.get(&id).copied().unwrap_or_else(|| {
+            std::fs::read_to_string(self.config.join("local-endpoint"))
+                .ok()
+                .and_then(|text| text.trim().parse::<EndpointId>().ok())
+                == Some(id)
+        })
+    }
+    /// Loads the saved list and the settings that belong to `current`.
+    fn load_daemon(&mut self, current: Option<EndpointId>) {
+        self.daemons = client::saved_daemons(&self.config).unwrap_or_default();
+        self.current = current;
+        self.local_paths = current.is_some_and(|id| self.is_local(id));
+        self.daemon_name = self
+            .daemons
+            .iter()
+            .find(|d| Some(d.id()) == current)
+            .and_then(|d| d.name.clone())
+            .unwrap_or_default();
+    }
+    /// Reconnects after the current daemon changed, or asks for a ticket if none is left.
+    fn switched(&mut self, current: Option<EndpointId>) {
+        if let Some(worker) = self.worker.take() {
+            worker.abort();
+        }
+        self.removal = None;
+        self.clear_session();
+        self.gateway = None;
+        self.gateway_dirty = false;
+        self.page = Page::Data;
+        self.load_daemon(current);
+        if current.is_some() {
+            self.connect();
+        } else {
+            self.pairing = true;
+            self.status = "Add a daemon with its pairing ticket.".into();
+        }
+    }
+    fn switch_daemon(&mut self, id: EndpointId) {
+        match client::select_daemon(&self.config, id) {
+            Ok(()) => self.switched(Some(id)),
+            Err(e) => self.status = format!("{e:#}"),
         }
     }
     fn send(&mut self, action: Action) {
@@ -275,12 +378,23 @@ impl App {
                         self.send(Action::ExportNames(path));
                     }
                 }
+                LocalUpdate::ExportName(label, path) => {
+                    if let Some(path) = path {
+                        self.send(Action::ExportName { label, path });
+                    }
+                }
+                LocalUpdate::ImportNames(path) => {
+                    if let Some(path) = path {
+                        self.send(Action::ImportNames(path));
+                    }
+                }
                 LocalUpdate::Paired(result) => {
                     self.busy = false;
                     match result {
-                        Ok(()) => {
+                        Ok(id) => {
                             self.ticket.clear();
-                            self.connect();
+                            self.new_daemon_name.clear();
+                            self.switched(Some(id));
                         }
                         Err(e) => self.status = e,
                     }
@@ -322,21 +436,7 @@ impl App {
                         Update::Disconnected(e) => format!("Disconnected: {e}. Retrying…"),
                         _ => "Connecting…".into(),
                     };
-                    self.ready = false;
-                    self.busy = false;
-                    self.jobs.clear();
-                    self.names.clear();
-                    self.selected = None;
-                    self.import_open = false;
-                    self.import_id = None;
-                    self.import_directory = None;
-                    self.import_source.clear();
-                    self.editing_name = false;
-                    self.name_editor_open = false;
-                    self.name_label.clear();
-                    self.completion_id += 1;
-                    self.removal = None;
-                    self.candidates.clear();
+                    self.clear_session();
                 }
                 Update::Event(event) => match event {
                     WatchEvent::JobUpdated(job) => {
@@ -973,6 +1073,23 @@ impl App {
                                                         }
                                                     }
                                                 }
+                                                if ui
+                                                    .button("Export pkarr…")
+                                                    .on_hover_text("Save a ZIP with this name's private signing key and current signed record.")
+                                                    .clicked()
+                                                {
+                                                    let tx = self.local_tx.clone();
+                                                    let label = name.label.clone();
+                                                    let file_name = format!("{}.zip", name.key);
+                                                    self.runtime.spawn_blocking(move || {
+                                                        let path = rfd::FileDialog::new()
+                                                            .set_title("Export pkarr name (includes private key)")
+                                                            .set_file_name(file_name)
+                                                            .add_filter("ZIP archive", &["zip"])
+                                                            .save_file();
+                                                        let _ = tx.send(LocalUpdate::ExportName(label, path));
+                                                    });
+                                                }
                                                 if icon_button(ui, Icon::Trash, "Remove name…")
                                                     .clicked()
                                                 {
@@ -1019,7 +1136,17 @@ impl App {
         if let Some(path) = &self.import_directory {
             ui.label(format!("Ticket import folder: {}", path.display()));
         }
-        ui.checkbox(&mut self.local_paths, "The daemon is on this computer");
+        if ui
+            .add_enabled(
+                self.current.is_some(),
+                egui::Checkbox::new(&mut self.local_paths, "The daemon is on this computer"),
+            )
+            .changed()
+        {
+            if let Some(id) = self.current {
+                self.local_daemons.insert(id, self.local_paths);
+            }
+        }
         ui.weak("Enable folder selection, drag-and-drop sharing, and opening downloaded folders. Only enable this when both apps use the same filesystem.");
         ui.separator();
         ui.heading("Gateway");
@@ -1062,28 +1189,39 @@ impl App {
         }
         ui.weak("The HTTP listener is on the daemon's loopback interface. Closing this app leaves the gateway running.");
         ui.separator();
-        ui.label(format!("Client configuration: {}", self.config.display()));
-        if ui.button("Connect to another daemon…").clicked() {
-            if let Some(worker) = self.worker.take() {
-                worker.abort();
+        ui.heading("Daemon");
+        if let Some(id) = self.current {
+            ui.label(format!("Endpoint ID: {id}"));
+            ui.horizontal(|ui| {
+                ui.label("Name");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.daemon_name)
+                        .hint_text(id.fmt_short().to_string()),
+                );
+                if ui.button("Save name").clicked() {
+                    match client::rename_daemon(&self.config, id, Some(self.daemon_name.clone())) {
+                        Ok(()) => self.load_daemon(Some(id)),
+                        Err(e) => self.status = format!("{e:#}"),
+                    }
+                }
+            });
+            if ui.button("Forget this daemon…").clicked() {
+                self.removal = Some(Removal::Daemon(id));
             }
-            self.ready = false;
-            self.busy = false;
-            self.pairing = true;
-            self.ticket.clear();
-            self.jobs.clear();
-            self.names.clear();
-            self.removal = None;
-            self.gateway = None;
-            self.gateway_dirty = false;
-            self.local_paths = false;
         }
+        ui.weak("Switch daemons or add another from the daemon menu at the top.");
+        ui.label(format!("Client configuration: {}", self.config.display()));
     }
 }
 
 impl eframe::App for App {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        storage.set_string("local_paths", self.local_paths.to_string());
+        let local: Vec<_> = self
+            .local_daemons
+            .iter()
+            .map(|(id, local)| format!("{id}={local}"))
+            .collect();
+        storage.set_string("local_daemons", local.join(" "));
     }
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         self.ui(ctx);
@@ -1154,6 +1292,37 @@ impl App {
         }
     }
 
+    fn daemon_menu(&mut self, ui: &mut egui::Ui) {
+        let current = self.daemons.iter().find(|d| Some(d.id()) == self.current);
+        let title = current.map_or_else(|| "No daemon".into(), |d| d.display_name());
+        let mut switch = None;
+        ui.menu_button(format!("Daemon: {title}"), |ui| {
+            for daemon in &self.daemons {
+                let selected = Some(daemon.id()) == self.current;
+                if ui
+                    .selectable_label(selected, daemon.display_name())
+                    .on_hover_text(daemon.id().to_string())
+                    .clicked()
+                {
+                    if !selected {
+                        switch = Some(daemon.id());
+                    }
+                    ui.close();
+                }
+            }
+            ui.separator();
+            if ui.button("Add daemon…").clicked() {
+                self.ticket.clear();
+                self.new_daemon_name.clear();
+                self.pairing = true;
+                ui.close();
+            }
+        });
+        if let Some(id) = switch {
+            self.switch_daemon(id);
+        }
+    }
+
     fn ui(&mut self, ctx: &egui::Context) {
         self.poll();
         ctx.request_repaint_after(Duration::from_millis(100));
@@ -1167,11 +1336,20 @@ impl App {
         });
         if self.pairing {
             egui::CentralPanel::default().show(ctx, |ui| {
-                ui.heading("Connect to Iroh Share"); ui.label("Paste the one-time ticket printed by your daemon. Your connection is saved for next time.");
+                ui.heading(if self.daemons.is_empty() { "Connect to Iroh Share" } else { "Add a daemon" });
+                ui.label("Paste the one-time ticket printed by your daemon. The daemon is saved and can be switched from the menu.");
                 ui.add_enabled_ui(!self.busy, |ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.ticket).password(true).hint_text("Pairing ticket").desired_width(f32::INFINITY));
-                    if ui.button("Connect").clicked() { self.pair(); }
-                    if client::configured_endpoint(&self.config).ok().flatten().is_some() && ui.button("Use saved connection").clicked() { self.ticket.clear(); self.connect(); }
+                    ui.add(egui::TextEdit::singleline(&mut self.ticket).hint_text("Pairing ticket").desired_width(f32::INFINITY));
+                    ui.add(egui::TextEdit::singleline(&mut self.new_daemon_name).hint_text("Name (optional), e.g. NAS").desired_width(f32::INFINITY));
+                    ui.horizontal(|ui| {
+                        if ui.button("Connect").clicked() { self.pair(); }
+                        if self.current.is_some() && ui.button("Cancel").clicked() {
+                            self.ticket.clear();
+                            self.new_daemon_name.clear();
+                            self.pairing = false;
+                            if self.worker.is_none() { self.connect(); }
+                        }
+                    });
                 });
             });
             return;
@@ -1179,6 +1357,7 @@ impl App {
         egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.strong("Iroh Share");
+                self.daemon_menu(ui);
                 for (page, title) in [(Page::Data, "Data"), (Page::Settings, "Settings")] {
                     if ui.selectable_value(&mut self.page, page, title).changed() {
                         self.name_editor_open = false;
@@ -1212,6 +1391,14 @@ impl App {
                                         let _ = tx.send(LocalUpdate::ExportNames(path));
                                     });
                                 }
+                                if ui.add_enabled(self.ready && !self.busy, egui::Button::new("Import pkarr names…"))
+                                    .on_hover_text("Restore names from an exported ZIP. Keys this daemon already manages are skipped.").clicked() {
+                                    let tx = self.local_tx.clone();
+                                    self.runtime.spawn_blocking(move || {
+                                        let path = rfd::FileDialog::new().set_title("Import pkarr names").add_filter("ZIP archive", &["zip"]).pick_file();
+                                        let _ = tx.send(LocalUpdate::ImportNames(path));
+                                    });
+                                }
                                 self.names(ui, false);
                             });
                     }
@@ -1225,10 +1412,19 @@ impl App {
 
         if let Some(removal) = self.removal.clone() {
             egui::Window::new("Confirm removal").collapsible(false).resizable(false).show(ctx, |ui| {
-                ui.label(match &removal { Removal::Data(_) => "Stop sharing this data? Files and names are kept. Names that follow this data will no longer receive updates.", Removal::Name(_) => "Remove this name and its signing key? Cached records may remain resolvable." });
+                ui.label(match &removal { Removal::Data(_) => "Stop sharing this data? Files and names are kept. Names that follow this data will no longer receive updates.", Removal::Name(_) => "Remove this name and its signing key? Cached records may remain resolvable.", Removal::Daemon(_) => "Forget this daemon? It is removed from this app's list only and keeps this app authorized. Adding it again needs a new pairing ticket." });
                 ui.horizontal(|ui| {
-                    if ui.add_enabled(self.ready && !self.busy, egui::Button::new("Remove")).clicked() {
-                        self.send(match removal { Removal::Data(id) => Action::Remove(id), Removal::Name(label) => Action::RemoveName(label) }); self.removal = None;
+                    let local = matches!(removal, Removal::Daemon(_));
+                    if ui.add_enabled(local || (self.ready && !self.busy), egui::Button::new("Remove")).clicked() {
+                        self.removal = None;
+                        match removal {
+                            Removal::Data(id) => self.send(Action::Remove(id)),
+                            Removal::Name(label) => self.send(Action::RemoveName(label)),
+                            Removal::Daemon(id) => match client::forget_daemon(&self.config, id) {
+                                Ok(current) => self.switched(current),
+                                Err(e) => self.status = format!("{e:#}"),
+                            },
+                        }
                     }
                     if ui.button("Cancel").clicked() { self.removal = None; }
                 });
@@ -1255,6 +1451,7 @@ fn name_status(state: &NameState) -> String {
     match state {
         NameState::Disabled => "Disabled".into(),
         NameState::WaitingForJob => "Waiting for data".into(),
+        NameState::NoRecords => "No records yet".into(),
         NameState::Publishing { .. } | NameState::PublishingRecords => "Publishing…".into(),
         NameState::Published { .. } | NameState::PublishedRecords { .. } => "Published".into(),
         NameState::Failed { error } => format!("Failed: {}", error.message),
@@ -1722,12 +1919,68 @@ mod tests {
     ) {
         let dir = tempfile::tempdir().unwrap();
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let mut app = App::create(runtime, dir.path().to_owned(), None, false);
+        let mut app = App::create(runtime, dir.path().to_owned(), None, BTreeMap::new());
         let (tx, rx) = mpsc::channel(128);
         app.updates = rx;
         let (actions, commands) = mpsc::channel(32);
         app.actions = actions;
         (dir, app, tx, commands)
+    }
+    #[test]
+    fn daemons_switch_with_their_own_local_setting_and_can_be_forgotten() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = |name: &str| {
+            client::load_or_create_key(&dir.path().join(name))
+                .unwrap()
+                .public()
+        };
+        let (a, b) = (id("a.key"), id("b.key"));
+        client::configure_endpoint(dir.path(), Some(a)).unwrap();
+        client::configure_endpoint(dir.path(), Some(b)).unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let mut app = App::create(
+            runtime,
+            dir.path().to_owned(),
+            None,
+            BTreeMap::from([(a, true)]),
+        );
+        assert_eq!(app.current, Some(b));
+        assert_eq!(app.daemons.len(), 2);
+        assert!(!app.local_paths);
+
+        app.jobs.insert(
+            7,
+            Job {
+                id: 7,
+                kind: JobKind::Share {
+                    path: "/x".into(),
+                    include_directory_name: false,
+                },
+                state: JobState::Queued,
+            },
+        );
+        app.switch_daemon(a);
+        assert_eq!(app.current, Some(a));
+        assert_eq!(client::configured_endpoint(dir.path()).unwrap(), Some(a));
+        assert!(app.local_paths);
+        assert!(app.jobs.is_empty() && !app.ready);
+
+        // A pending forget survives the reconnect loop's resets.
+        let (tx, rx) = mpsc::channel(8);
+        app.updates = rx;
+        app.removal = Some(Removal::Daemon(a));
+        tx.try_send(Update::Disconnected("unreachable".into()))
+            .unwrap();
+        app.poll();
+        assert!(matches!(app.removal, Some(Removal::Daemon(_))));
+
+        let current = client::forget_daemon(dir.path(), a).unwrap();
+        app.switched(current);
+        assert_eq!(app.current, Some(b));
+        assert_eq!(app.daemons.len(), 1);
+        assert!(!app.local_paths);
+        app.switched(client::forget_daemon(dir.path(), b).unwrap());
+        assert!(app.pairing && app.current.is_none());
     }
     #[test]
     fn download_tab_completion_uses_daemon_and_keeps_only_directories() {

@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 hickory-proto = { version = "0.25", default-features = false, features = ["text-parsing"] }
-zip = { version = "2", default-features = false }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 dirs.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -101,6 +101,15 @@ enum NameCommand {
     Export {
         output: PathBuf,
     },
+    /// Export one name's pkarr key and signed record to a new ZIP file on this computer.
+    ExportName {
+        label: String,
+        output: PathBuf,
+    },
+    /// Restore names from a ZIP written by `export` or `export-name`.
+    Import {
+        archive: PathBuf,
+    },
     Create {
         label: String,
         #[command(flatten)]
@@ -288,6 +297,33 @@ impl Actor {
                 ControlMessage::ExportNames(message) => {
                     let result = self.names.export_zip().map_err(|e| e.to_string());
                     let _ = message.tx.send(result).await;
+                }
+                ControlMessage::ExportName(message) => {
+                    let WithChannels { inner, tx, .. } = message;
+                    let result = self
+                        .names
+                        .export_name(&inner.label)
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(result).await;
+                }
+                ControlMessage::ImportNames(message) => {
+                    let WithChannels { inner, tx, .. } = message;
+                    let result = self
+                        .names
+                        .import_zip(&inner.archive, &self.jobs)
+                        .map_err(|e| format!("{e:#}"));
+                    if let Ok(outcomes) = &result {
+                        for name in self.names.list() {
+                            let imported = outcomes.iter().any(|o| {
+                                matches!(&o.outcome, iroh_share_proto::ImportOutcome::Imported { label } if *label == name.label)
+                            });
+                            if imported {
+                                self.broadcast(WatchEvent::NameUpdated(Box::new(name)))
+                                    .await;
+                            }
+                        }
+                    }
+                    let _ = tx.send(result).await;
                 }
                 ControlMessage::ListNames(message) => {
                     let result = { Ok(self.names.list()) };
@@ -883,6 +919,22 @@ async fn client(state_dir: &Path, command: CommandLine) -> Result<()> {
                 client.export_names(&output).await?;
                 println!("Exported pkarr names to {}", output.display());
             }
+            NameCommand::ExportName { label, output } => {
+                client.export_name(label, &output).await?;
+                println!("Exported pkarr name to {}", output.display());
+            }
+            NameCommand::Import { archive } => {
+                for imported in client.import_names(&archive).await? {
+                    match imported.outcome {
+                        iroh_share_proto::ImportOutcome::Imported { label } => {
+                            println!("{}  imported as {label}", imported.key)
+                        }
+                        iroh_share_proto::ImportOutcome::Skipped { reason } => {
+                            println!("{}  skipped: {reason}", imported.key)
+                        }
+                    }
+                }
+            }
             NameCommand::List => {
                 for name in client.list_names().await? {
                     println!("{}  {}\n{:#?}", name.label, name.key.url(), name);
@@ -1315,9 +1367,7 @@ mod tests {
             .await?
             .map_err(anyhow::Error::msg)?;
         let backup = zip::ZipArchive::new(std::io::Cursor::new(archive))?;
-        assert!(backup
-            .file_names()
-            .any(|name| name.ends_with("/private-key.hex")));
+        assert!(backup.file_names().any(|name| name.ends_with(".key")));
         let (restored, _) = names::Names::load(temp.path(), false)?;
         let saved = restored.restored_data();
         assert!(

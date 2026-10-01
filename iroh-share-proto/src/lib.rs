@@ -206,6 +206,22 @@ pub enum WatchEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportNames {}
 
+/// Export one name's key and current record as a ZIP archive, in the same
+/// layout as [`ExportNames`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportName {
+    pub label: String,
+}
+
+/// Restore names from an archive produced by [`ExportNames`] or [`ExportName`].
+///
+/// The whole archive is validated before any name is added. Keys the daemon
+/// already manages are skipped, never overwritten.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportNames {
+    pub archive: Vec<u8>,
+}
+
 pub type RpcResult<T> = Result<T, String>;
 
 #[rpc_requests(message = ControlMessage, no_spans)]
@@ -254,4 +270,8 @@ pub enum ControlProtocol {
     GetImportDirectory(GetImportDirectory),
     #[rpc(tx=oneshot::Sender<RpcResult<Vec<u8>>>)]
     ExportNames(ExportNames),
+    #[rpc(tx=oneshot::Sender<RpcResult<Vec<u8>>>)]
+    ExportName(ExportName),
+    #[rpc(tx=oneshot::Sender<RpcResult<Vec<ImportedName>>>)]
+    ImportNames(ImportNames),
 }
