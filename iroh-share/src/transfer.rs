@@ -253,7 +253,7 @@ async fn transfer_saved(
 /// publisher's address-index datagram hook.
 async fn discover_providers(hash: Hash) -> Result<Vec<iroh::EndpointId>> {
     tokio::time::timeout(Duration::from_secs(60), async {
-        let dht = Dht::client()?;
+        let dht = Dht::builder().port(0).build()?;
         ensure!(dht.bootstrapped().await?, "Mainline bootstrap failed");
         let index = AddrIndex::discover(dht.clone()).await?;
         lookup_providers(dht, index, hash).await
