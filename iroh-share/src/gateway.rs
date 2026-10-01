@@ -203,7 +203,7 @@ async fn serve(
         let listener = tokio::net::TcpListener::bind(config.listen)
             .await
             .context("cannot bind gateway HTTP address")?;
-        let dht = n0_mainline::Dht::client()?;
+        let dht = n0_mainline::Dht::builder().port(0).build()?;
         let index = match config.index_server {
             Some(server) => AddrIndex::udp(dht.clone(), server).await?,
             None => AddrIndex::discover(dht.clone()).await?,

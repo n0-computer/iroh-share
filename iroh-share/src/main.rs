@@ -739,7 +739,10 @@ async fn daemon(
     let dht = if no_announce {
         None
     } else {
-        Some(n0_mainline::Dht::client()?)
+        // A random port, not Mainline's default 6881: behind a port-preserving
+        // NAT, two machines on 6881 share one public socket and overwrite each
+        // other's address-index record.
+        Some(n0_mainline::Dht::builder().port(0).build()?)
     };
     let (names, name_publications) = names::Names::load(state_dir, !no_announce)?;
     let restored_data = names.restored_data();
