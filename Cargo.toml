@@ -18,7 +18,7 @@ z32 = "1.3"
 iroh-share-proto = { path = "iroh-share-proto" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-dirs = "6"
+dirs = "7"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 irpc-iroh = "0.17"
