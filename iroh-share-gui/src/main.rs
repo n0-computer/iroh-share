@@ -844,8 +844,19 @@ impl App {
                                 }
                                 if let JobState::Seeding { ticket, .. } = &job.state {
                                     row_line(ui, |ui| {
-                                        link_contents(ui, &content_url(ticket));
-                                        copy_ticket(ui, &ticket.to_string());
+                                        link_contents(ui, &content_url(ticket), Icon::Link);
+                                        copy_icon(
+                                            ui,
+                                            Icon::Ticket,
+                                            &ticket.to_string(),
+                                            "Copy ticket, for sendme and compatible apps",
+                                        );
+                                        copy_icon(
+                                            ui,
+                                            Icon::Hash,
+                                            &ticket.hash().to_hex(),
+                                            "Copy BLAKE3 hash (hex)",
+                                        );
                                     });
                                 } else {
                                     row_line(ui, |ui| { ui.weak("Content link available after import"); });
@@ -1494,12 +1505,24 @@ fn copy_value(ui: &mut egui::Ui, value: &str, label: &str, kind: &str) -> bool {
     .on_hover_text(format!("Click to copy {kind}"))
     .clicked()
 }
-/// A labelled button, so it is not confused with the URL copy icon next to it.
-fn copy_ticket(ui: &mut egui::Ui, ticket: &str) {
-    copy_button(ui, ticket, "ticket", |copied| {
-        egui::Button::new(if copied { "Copied!" } else { "Ticket" }).min_size(egui::vec2(0.0, 24.0))
-    })
-    .on_hover_text("Copy ticket (hash and provider address, for iroh clients)");
+/// An icon that copies `value`, and shows a check mark for two seconds after.
+fn copy_icon(ui: &mut egui::Ui, icon: Icon, value: &str, label: &str) {
+    let id = ui.id().with(("copied", label, value));
+    let now = ui.input(|i| i.time);
+    let copied = ui
+        .ctx()
+        .data(|d| d.get_temp::<f64>(id))
+        .is_some_and(|until| now < until);
+    let (icon, text) = if copied {
+        (Icon::Check, "Copied!")
+    } else {
+        (icon, label)
+    };
+    if icon_button(ui, icon, text).clicked() {
+        ui.ctx().copy_text(value.to_owned());
+        ui.ctx().data_mut(|d| d.insert_temp(id, now + 2.0));
+        ui.ctx().request_repaint_after(Duration::from_secs(2));
+    }
 }
 /// Copies `value` on click and shows "Copied!" for two seconds.
 fn copy_button(
@@ -1525,7 +1548,13 @@ fn copy_button(
 
 #[derive(Clone, Copy)]
 enum Icon {
-    Copy,
+    /// A `blake3.net` link to one version.
+    Link,
+    /// A `pkarr.net` link to a name.
+    Name,
+    Ticket,
+    Hash,
+    Check,
     Open,
     Trash,
 }
@@ -1554,12 +1583,44 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
             );
         };
         match icon {
-            Icon::Copy => {
-                line((3.0, 11.0), (1.0, 11.0));
-                line((1.0, 11.0), (1.0, 1.0));
-                line((1.0, 1.0), (11.0, 1.0));
-                line((11.0, 1.0), (11.0, 3.0));
-                rect((5.0, 5.0), (15.0, 15.0));
+            Icon::Link => {
+                // Two interlocking chain links.
+                let pill = |a: (f32, f32), b: (f32, f32)| {
+                    painter.rect_stroke(
+                        egui::Rect::from_min_max(point(a.0, a.1), point(b.0, b.1)),
+                        3.0,
+                        stroke,
+                        egui::StrokeKind::Inside,
+                    );
+                };
+                pill((0.0, 5.0), (10.0, 11.0));
+                pill((6.0, 5.0), (16.0, 11.0));
+            }
+            Icon::Name => {
+                // A luggage tag with its hole.
+                line((1.0, 4.0), (10.0, 4.0));
+                line((10.0, 4.0), (15.0, 8.0));
+                line((15.0, 8.0), (10.0, 12.0));
+                line((10.0, 12.0), (1.0, 12.0));
+                line((1.0, 12.0), (1.0, 4.0));
+                painter.circle_stroke(point(10.5, 8.0), 1.2, stroke);
+            }
+            Icon::Ticket => {
+                // A ticket stub with a perforation.
+                rect((1.0, 3.0), (15.0, 13.0));
+                for y in [4.5, 7.0, 9.5] {
+                    line((10.0, y), (10.0, y + 1.5));
+                }
+            }
+            Icon::Hash => {
+                line((6.0, 2.0), (4.0, 14.0));
+                line((12.0, 2.0), (10.0, 14.0));
+                line((2.0, 6.0), (14.0, 6.0));
+                line((1.5, 10.0), (13.5, 10.0));
+            }
+            Icon::Check => {
+                line((2.0, 8.0), (6.0, 12.0));
+                line((6.0, 12.0), (14.0, 3.0));
             }
             Icon::Open => {
                 line((2.0, 6.0), (2.0, 14.0));
@@ -1584,7 +1645,8 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
     response
 }
 
-fn link_contents(ui: &mut egui::Ui, url: &str) {
+/// A compact link label, an icon to copy it, and one to open it.
+fn link_contents(ui: &mut egui::Ui, url: &str, icon: Icon) {
     ui.allocate_ui_with_layout(
         egui::vec2(250.0, 24.0),
         egui::Layout::left_to_right(egui::Align::Center),
@@ -1593,9 +1655,11 @@ fn link_contents(ui: &mut egui::Ui, url: &str) {
             copy_value(ui, url, &compact_url(url), "URL");
         },
     );
-    if icon_button(ui, Icon::Copy, "Copy URL").clicked() {
-        ui.ctx().copy_text(url.to_owned());
-    }
+    let label = match icon {
+        Icon::Name => "Copy name link, always the current version",
+        _ => "Copy link to this version",
+    };
+    copy_icon(ui, icon, url, label);
     if icon_button(ui, Icon::Open, "Open URL in browser").clicked() {
         ui.ctx().open_url(egui::OpenUrl::new_tab(url));
     }
@@ -1603,7 +1667,7 @@ fn link_contents(ui: &mut egui::Ui, url: &str) {
 
 fn name_link(ui: &mut egui::Ui, name: &Name, remove: Option<bool>) -> bool {
     row_line(ui, |ui| {
-        link_contents(ui, name.key.url().as_str());
+        link_contents(ui, name.key.url().as_str(), Icon::Name);
         let clicked = remove.is_some_and(|enabled| {
             ui.add_enabled_ui(enabled, |ui| icon_button(ui, Icon::Trash, "Remove name…"))
                 .inner
