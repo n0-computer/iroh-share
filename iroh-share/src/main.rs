@@ -213,6 +213,12 @@ impl Actor {
                     let _ = message.tx.send(Ok(())).await;
                     break;
                 }
+                ControlMessage::GetGateway(message) => {
+                    let _ = message.tx.send(Ok(removed_gateway())).await;
+                }
+                ControlMessage::SetGateway(message) => {
+                    let _ = message.tx.send(Err(GATEWAY_REMOVED.to_owned())).await;
+                }
                 ControlMessage::CreatePairingTicket(message) => {
                     let ticket = self.pairing.issue(control::pairing_address(&self.endpoint));
                     let _ = message.tx.send(Ok(ticket)).await;
@@ -430,6 +436,10 @@ impl Actor {
                             }
                         }
                     }
+                    if alive {
+                        alive =
+                            send_update(&tx, WatchEvent::GatewayUpdated(removed_gateway())).await;
+                    }
                     if alive && send_update(&tx, WatchEvent::SnapshotComplete).await {
                         self.watchers.push(tx);
                     }
@@ -619,6 +629,21 @@ impl Actor {
         );
         self.jobs.insert(id, job.clone());
         job
+    }
+}
+
+const GATEWAY_REMOVED: &str =
+    "This daemon no longer includes a gateway. Install Iroh Link Gateway to browse blake3.net and pkarr.net links.";
+
+/// What the daemon reports to clients from 0.1.7 and earlier, which still
+/// show gateway settings.
+fn removed_gateway() -> iroh_share_proto::GatewaySnapshot {
+    iroh_share_proto::GatewaySnapshot {
+        config: iroh_share_proto::GatewayConfig {
+            enabled: false,
+            ..Default::default()
+        },
+        state: iroh_share_proto::GatewayState::Disabled,
     }
 }
 
@@ -1017,6 +1042,15 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let task = tokio::spawn(actor.run(shutdown_rx));
         let mut updates = client.server_streaming(Watch {}, 64).await?;
+        // Clients from 0.1.7 and earlier still expect gateway state.
+        assert!(matches!(
+            updates
+                .recv()
+                .await?
+                .context("watch closed")?
+                .map_err(anyhow::Error::msg)?,
+            WatchEvent::GatewayUpdated(snapshot) if snapshot == removed_gateway()
+        ));
         assert!(matches!(
             updates
                 .recv()
@@ -1025,6 +1059,20 @@ mod tests {
                 .map_err(anyhow::Error::msg)?,
             WatchEvent::SnapshotComplete
         ));
+        let gateway = client
+            .rpc(iroh_share_proto::GetGateway {})
+            .await?
+            .map_err(anyhow::Error::msg)?;
+        assert_eq!(gateway, removed_gateway());
+        assert_eq!(
+            client
+                .rpc(iroh_share_proto::SetGateway {
+                    config: Default::default(),
+                })
+                .await?
+                .unwrap_err(),
+            GATEWAY_REMOVED
+        );
         let invitation = client
             .rpc(iroh_share_proto::CreatePairingTicket {})
             .await?
@@ -1107,6 +1155,14 @@ mod tests {
         assert!(matches!(
             first,
             WatchEvent::JobUpdated(job) if matches!(job.state, JobState::Seeding { .. })
+        ));
+        assert!(matches!(
+            snapshot
+                .recv()
+                .await?
+                .context("watch closed")?
+                .map_err(anyhow::Error::msg)?,
+            WatchEvent::GatewayUpdated(_)
         ));
         assert!(matches!(
             snapshot

@@ -434,6 +434,8 @@ impl App {
                         self.ready = true;
                         self.status = "Connected".into();
                     }
+                    // Only sent for clients from 0.1.7 and earlier.
+                    WatchEvent::GatewayUpdated(_) => {}
                 },
                 Update::ImportDirectory(path) => self.import_directory = Some(path),
                 Update::Imported { job, name_error } => {

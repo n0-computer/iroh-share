@@ -24,7 +24,7 @@ The announcement library is pinned to a Git revision in `Cargo.toml`.
 The iRPC protocol lives in `iroh-share-proto/src/lib.rs`. Hashes use `iroh_blobs::Hash`, and tickets
 use `BlobTicket`. Download inputs are parsed by clients using `DownloadSource::from_str`
 from the protocol crate. The control server
-shares the blob iroh endpoint on the `/iroh-share/control/6` ALPN. It checks the
+shares the blob iroh endpoint on the `/iroh-share/control/5` ALPN. It checks the
 authenticated remote endpoint ID against a persistent allowlist before dispatching
 RPC requests. Blob connections are public.
 
@@ -43,7 +43,7 @@ optional top-level hash/ticket. Seeding continues until removal or daemon shutdo
 it does not imply that public Mainline publication has succeeded.
 
 `Watch` streams `Result<WatchEvent, String>`. It first emits `JobUpdated` for each
-existing job and `NameUpdated` for each name, then `SnapshotComplete` (also for an empty daemon). Subsequent events
+existing job, `NameUpdated` for each name, and one `GatewayUpdated` for older clients, then `SnapshotComplete` (also for an empty daemon). Subsequent events
 are complete `JobUpdated`/`NameUpdated` snapshots or `JobRemoved { id }`/`NameRemoved { label }`. Clients replace their
 entry on an update and delete it on removal. Slow watchers are disconnected;
 reconnect to obtain a fresh snapshot.

@@ -32,7 +32,10 @@ persist. The daemon prints an invitation on first startup; an authorized client 
 request another through `CreatePairingTicket` (CLI: `iroh-share control pair`).
 
 Control and blob traffic use the daemon's shared iroh endpoint, with distinct ALPNs.
-The control ALPN is `/iroh-share/control/6`; clients and daemon must agree on it.
+The control ALPN is `/iroh-share/control/5`; clients and daemon must agree on it.
+The gateway messages (`GetGateway`, `SetGateway`, `GatewayUpdated`) remain only so
+clients and daemons from 0.1.7 and earlier keep working: the daemon reports the
+gateway as disabled and rejects `SetGateway`. New clients ignore `GatewayUpdated`.
 Control access requires an allowlisted endpoint ID. Administrative clients can use
 `ListControl`, `AllowControl`, and `RevokeControl`. Revocation also closes active
 control connections. These capabilities are optional UI features, not prerequisites
