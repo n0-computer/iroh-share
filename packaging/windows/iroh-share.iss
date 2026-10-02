@@ -45,10 +45,13 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Name: "{group}\Iroh Share"; Filename: "{app}\iroh-share-gui.exe"; WorkingDir: "{app}"; IconFilename: "{app}\iroh-share.ico"
 Name: "{group}\Start background daemon"; Filename: "{app}\iroh-share-background.exe"; WorkingDir: "{app}"; IconFilename: "{app}\iroh-share.ico"
 Name: "{group}\Stop background daemon"; Filename: "{app}\iroh-share-background.exe"; Parameters: "stop"; WorkingDir: "{app}"; IconFilename: "{app}\iroh-share.ico"
+Name: "{group}\Install browser extension"; Filename: "https://chromewebstore.google.com/detail/iroh-link/aajlbmaphckgbinhnifpiggcmdfnofcd"
 Name: "{group}\Uninstall Iroh Share"; Filename: "{uninstallexe}"
 
 [Run]
 Filename: "{app}\iroh-share-gui.exe"; Description: "Open Iroh Share"; Flags: nowait postinstall skipifsilent
+Filename: "https://chromewebstore.google.com/detail/iroh-link/aajlbmaphckgbinhnifpiggcmdfnofcd"; Description: "Install the browser extension from the Chrome Web Store"; Flags: shellexec nowait postinstall skipifsilent
+Filename: "https://github.com/n0-computer/iroh-content-discovery/tree/main/iroh-link-extension#install-in-firefox"; Description: "Show Firefox extension instructions"; Flags: shellexec nowait postinstall skipifsilent unchecked
 
 [Code]
 function StopDaemon(): Boolean;

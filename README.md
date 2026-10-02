@@ -197,7 +197,7 @@ The daemon embeds `iroh-link-gateway` as a library, with its own iroh endpoint a
 Mainline resolver. It streams the content-addressed web through normal network
 protocols and does not access the daemon's blob store directly. Its separate endpoint
 can fetch content from the daemon like any other provider. Configure the companion
-browser extension to use the gateway's HTTP address on the daemon machine.
+[browser extension][iroh-link] to use the gateway's HTTP address on the daemon machine.
 `--no-announce` disables publication, independently of the gateway setting.
 
 The control protocol exposes `GetGateway`, `SetGateway { config }`, and complete
@@ -521,3 +521,5 @@ at your option.
 ## Contribution
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this project by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+
+[iroh-link]: https://chromewebstore.google.com/detail/iroh-link/aajlbmaphckgbinhnifpiggcmdfnofcd

@@ -4,4 +4,6 @@ Setup installs the desktop app, command-line tools, and background daemon under 
 
 The daemon keeps running when you close the desktop app. Use the Start menu's Stop background daemon shortcut to stop it. You can disable automatic startup in Windows Settings > Apps > Startup.
 
+The daemon also runs a local gateway for blake3.net and pkarr.net links. To use it from your browser, install the iroh link extension; setup offers to open the Chrome Web Store page when it finishes.
+
 Uninstall stops the daemon and removes the apps and startup entry. Shared/downloaded files, saved state, and client identities are kept.
