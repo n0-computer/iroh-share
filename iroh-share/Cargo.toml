@@ -12,7 +12,7 @@ keywords = ["iroh", "p2p", "file-sharing", "blake3", "content-addressed"]
 
 [dependencies]
 hickory-proto = { version = "0.25", default-features = false, features = ["text-parsing"] }
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
 dirs.workspace = true
 serde.workspace = true
 serde_json.workspace = true
