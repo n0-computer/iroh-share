@@ -1,6 +1,5 @@
 mod control;
 mod dns_records;
-mod gateway;
 mod names;
 mod paths;
 mod recovery;
@@ -154,7 +153,6 @@ struct Actor {
     endpoint: Endpoint,
     access: control::Access,
     pairing: control::Pairing,
-    gateway: gateway::Manager,
     watchers: Vec<irpc::channel::mpsc::Sender<RpcResult<WatchEvent>>>,
     refreshes: BTreeMap<u64, mpsc::Sender<()>>,
     imports_dir: PathBuf,
@@ -186,11 +184,6 @@ impl Actor {
                     }
                     continue;
                 }
-                result = self.gateway.updates.changed() => {
-                    if result.is_err() { break; }
-                    self.broadcast(WatchEvent::GatewayUpdated(self.gateway.snapshot())).await;
-                    continue;
-                }
                 message = self.rx.recv() => match message { Some(message) => message, None => break },
                 Some(checkpoint) = self.checkpoints_rx.recv() => {
                     let result = self.names.checkpoint(checkpoint.id, checkpoint.phase).map_err(|e| e.to_string());
@@ -219,19 +212,6 @@ impl Actor {
                 ControlMessage::Shutdown(message) => {
                     let _ = message.tx.send(Ok(())).await;
                     break;
-                }
-                ControlMessage::GetGateway(message) => {
-                    let _ = message.tx.send(Ok(self.gateway.snapshot())).await;
-                }
-                ControlMessage::SetGateway(message) => {
-                    let controller = self.gateway.controller();
-                    tokio::spawn(async move {
-                        let result = controller
-                            .set(message.inner.config)
-                            .await
-                            .map_err(|error| format!("{error:#}"));
-                        let _ = message.tx.send(result).await;
-                    });
                 }
                 ControlMessage::CreatePairingTicket(message) => {
                     let ticket = self.pairing.issue(control::pairing_address(&self.endpoint));
@@ -450,11 +430,6 @@ impl Actor {
                             }
                         }
                     }
-                    if alive {
-                        alive =
-                            send_update(&tx, WatchEvent::GatewayUpdated(self.gateway.snapshot()))
-                                .await;
-                    }
                     if alive && send_update(&tx, WatchEvent::SnapshotComplete).await {
                         self.watchers.push(tx);
                     }
@@ -467,7 +442,6 @@ impl Actor {
         for (_, task) in self.tasks {
             let _ = task.await;
         }
-        self.gateway.shutdown().await;
     }
 
     async fn refresh_names(&mut self) {
@@ -772,7 +746,6 @@ async fn daemon(
         endpoint: blob_endpoint,
         access,
         pairing,
-        gateway: gateway::Manager::load(state_dir)?,
         watchers: Vec::new(),
         refreshes: BTreeMap::new(),
         imports_dir,
@@ -1021,13 +994,6 @@ mod tests {
         let (names, _) = names::Names::load(temp.path(), false)?;
         let (_name_updates_tx, name_updates_rx) = mpsc::channel(128);
         let (checkpoints_tx, checkpoints_rx) = mpsc::channel(64);
-        std::fs::write(
-            temp.path().join("gateway.json"),
-            serde_json::to_vec(&iroh_share_proto::GatewayConfig {
-                enabled: false,
-                ..Default::default()
-            })?,
-        )?;
         let actor = Actor {
             rx,
             jobs: BTreeMap::new(),
@@ -1040,7 +1006,6 @@ mod tests {
             endpoint: endpoint.clone(),
             access,
             pairing: control::Pairing::default(),
-            gateway: gateway::Manager::load(temp.path())?,
             watchers: Vec::new(),
             refreshes: BTreeMap::new(),
             imports_dir: temp.path().join("imports"),
@@ -1058,43 +1023,8 @@ mod tests {
                 .await?
                 .context("watch closed")?
                 .map_err(anyhow::Error::msg)?,
-            WatchEvent::GatewayUpdated(_)
-        ));
-        assert!(matches!(
-            updates
-                .recv()
-                .await?
-                .context("watch closed")?
-                .map_err(anyhow::Error::msg)?,
             WatchEvent::SnapshotComplete
         ));
-        let gateway = client
-            .rpc(iroh_share_proto::GetGateway {})
-            .await?
-            .map_err(anyhow::Error::msg)?;
-        assert_eq!(gateway.state, iroh_share_proto::GatewayState::Disabled);
-        let config = iroh_share_proto::GatewayConfig {
-            listen: "127.0.0.1:0".parse()?,
-            ..gateway.config
-        };
-        client
-            .rpc(iroh_share_proto::SetGateway {
-                config: config.clone(),
-            })
-            .await?
-            .map_err(anyhow::Error::msg)?;
-        assert!(
-            matches!(updates.recv().await?.context("watch closed")?.map_err(anyhow::Error::msg)?, WatchEvent::GatewayUpdated(snapshot) if snapshot.config == config)
-        );
-        assert!(client
-            .rpc(iroh_share_proto::SetGateway {
-                config: iroh_share_proto::GatewayConfig {
-                    listen: "0.0.0.0:8080".parse()?,
-                    ..config
-                }
-            })
-            .await?
-            .is_err());
         let invitation = client
             .rpc(iroh_share_proto::CreatePairingTicket {})
             .await?
@@ -1177,14 +1107,6 @@ mod tests {
         assert!(matches!(
             first,
             WatchEvent::JobUpdated(job) if matches!(job.state, JobState::Seeding { .. })
-        ));
-        assert!(matches!(
-            snapshot
-                .recv()
-                .await?
-                .context("watch closed")?
-                .map_err(anyhow::Error::msg)?,
-            WatchEvent::GatewayUpdated(_)
         ));
         assert!(matches!(
             snapshot

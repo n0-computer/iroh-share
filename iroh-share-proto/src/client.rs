@@ -84,27 +84,6 @@ impl ControlClient {
             .context("daemon shutdown request timed out")??
             .map_err(anyhow::Error::msg)
     }
-    pub async fn get_gateway(&self) -> Result<crate::GatewaySnapshot> {
-        tokio::time::timeout(
-            Duration::from_secs(10),
-            self.client.rpc(crate::GetGateway {}),
-        )
-        .await
-        .context("gateway settings request timed out")??
-        .map_err(anyhow::Error::msg)
-    }
-    pub async fn set_gateway(
-        &self,
-        config: crate::GatewayConfig,
-    ) -> Result<crate::GatewaySnapshot> {
-        tokio::time::timeout(
-            Duration::from_secs(10),
-            self.client.rpc(crate::SetGateway { config }),
-        )
-        .await
-        .context("gateway settings request timed out; check current settings before retrying")??
-        .map_err(anyhow::Error::msg)
-    }
     pub async fn create_pairing_ticket(&self) -> Result<crate::PairingTicket> {
         tokio::time::timeout(
             Duration::from_secs(10),

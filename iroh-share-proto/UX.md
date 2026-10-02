@@ -150,7 +150,7 @@ wrapping, keeping each DNS record on a single visual line.
 Edit DNS records in the existing name's row, with Save and Cancel beside it.
 The final new-name row keeps a separate draft and is never reused for editing.
 
-The bundled gateway resolves apex HTTPS records, not URI-only records. The
+Iroh Link Gateway resolves apex HTTPS records, not URI-only records. The
 default DNS template includes only an apex HTTPS record for an
 HTTPS origin. Full-URL URI redirects with paths or queries require resolver
 support and must not be represented as hostname-only aliases.

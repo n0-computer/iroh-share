@@ -32,7 +32,6 @@ n0-future.workspace = true
 walkdir.workspace = true
 blake3.workspace = true
 iroh-mainline-endpoint-discovery.workspace = true
-iroh-link-gateway.workspace = true
 n0-mainline.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

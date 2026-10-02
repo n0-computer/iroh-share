@@ -41,8 +41,7 @@ journalctl --user -u iroh-share.service -f
 
 `control pair` creates a one-client invitation for a frontend. The service
 suppresses the automatic first-start invitation so it is not written to the
-journal. Ticket imports default to `~/Downloads/Iroh Share`; the embedded gateway
-uses its saved configuration, initially `127.0.0.1:45475`.
+journal. Ticket imports default to `~/Downloads/Iroh Share`.
 
 To customize paths or logging, run `systemctl --user edit iroh-share.service`:
 

@@ -4,7 +4,6 @@ use std::{path::PathBuf, time::Duration};
 use tokio::sync::mpsc;
 
 pub enum Action {
-    SetGateway(iroh_share_proto::GatewayConfig),
     CompletePath {
         id: u64,
         path: PathBuf,
@@ -33,7 +32,6 @@ pub enum Action {
 }
 
 pub enum Update {
-    GatewaySaved(Result<iroh_share_proto::GatewaySnapshot, String>),
     Completion {
         id: u64,
         result: Result<iroh_share_proto::PathCompletions, String>,
@@ -114,7 +112,6 @@ async fn session(
         .await
         .context("initial snapshot timed out")??;
     let mut completions = tokio::task::JoinSet::new();
-    let mut settings_requests = tokio::task::JoinSet::new();
     loop {
         tokio::select! {
             _ = tx.closed() => return Ok(()),
@@ -122,22 +119,12 @@ async fn session(
                 let event = event?.context("daemon disconnected")?.map_err(anyhow::Error::msg)?;
                 tx.send(Update::Event(event)).await?;
             }
-            Some(result) = settings_requests.join_next() => {
-                if let Ok(update) = result { tx.send(update).await?; }
-            }
             Some(result) = completions.join_next() => {
                 if let Ok(update) = result { tx.send(update).await?; }
             }
             action = actions.recv() => {
                 let Some(action) = action else { return Ok(()); };
                 let result = match action {
-                    Action::SetGateway(config) => {
-                        let client = client.clone();
-                        settings_requests.spawn(async move {
-                            Update::GatewaySaved(client.set_gateway(config).await.map_err(|error| format!("{error:#}")))
-                        });
-                        continue;
-                    }
                     Action::CompletePath { id, path } => {
                         completions.abort_all();
                         let client = client.clone();

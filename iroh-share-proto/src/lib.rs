@@ -14,7 +14,7 @@ pub use iroh::EndpointId;
 pub use iroh_blobs::{ticket::BlobTicket, Hash};
 pub use url::Url;
 /// Control shares the blob endpoint; only allowlisted endpoint IDs may use it.
-pub const CONTROL_ALPN: &[u8] = b"/iroh-share/control/5";
+pub const CONTROL_ALPN: &[u8] = b"/iroh-share/control/6";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AllowControl {
     pub endpoint: EndpointId,
@@ -28,9 +28,6 @@ pub struct ListControl {}
 
 mod download;
 pub use download::*;
-
-mod gateway;
-pub use gateway::*;
 
 mod pairing;
 pub use pairing::*;
@@ -199,7 +196,6 @@ pub enum WatchEvent {
     JobRemoved {
         id: u64,
     },
-    GatewayUpdated(GatewaySnapshot),
 }
 
 /// Export all naming keys and current records as a ZIP archive.
@@ -255,10 +251,6 @@ pub enum ControlProtocol {
     CompletePath(CompletePath),
     #[rpc(tx=oneshot::Sender<RpcResult<PairingTicket>>)]
     CreatePairingTicket(CreatePairingTicket),
-    #[rpc(tx=oneshot::Sender<RpcResult<GatewaySnapshot>>)]
-    GetGateway(GetGateway),
-    #[rpc(tx=oneshot::Sender<RpcResult<GatewaySnapshot>>)]
-    SetGateway(SetGateway),
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     Shutdown(Shutdown),
     /// Rescan a local directory followed by at least one managed name.

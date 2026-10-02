@@ -5,7 +5,7 @@ Follow [UX.md](UX.md) for shared publishing workflows and interaction rules.
 This is a capability guide for clients of the irpc control protocol. Frontends can
 choose their own layout and supported features; they do not need identical screens
 or synchronized feature sets. The Rust types in `src/lib.rs`, `src/names.rs`,
-`src/gateway.rs`, `src/download.rs`, and `src/pairing.rs` define the wire contract.
+`src/download.rs`, and `src/pairing.rs` define the wire contract.
 
 ## Connection and identity
 
@@ -32,7 +32,7 @@ persist. The daemon prints an invitation on first startup; an authorized client 
 request another through `CreatePairingTicket` (CLI: `iroh-share control pair`).
 
 Control and blob traffic use the daemon's shared iroh endpoint, with distinct ALPNs.
-The control ALPN is `/iroh-share/control/5`; clients and daemon must agree on it.
+The control ALPN is `/iroh-share/control/6`; clients and daemon must agree on it.
 Control access requires an allowlisted endpoint ID. Administrative clients can use
 `ListControl`, `AllowControl`, and `RevokeControl`. Revocation also closes active
 control connections. These capabilities are optional UI features, not prerequisites
@@ -40,14 +40,14 @@ for pairing or ordinary data management.
 
 ## Live state and reconnection
 
-Subscribe with `Watch`. Each `JobUpdated`, `NameUpdated`, or `GatewayUpdated` event
+Subscribe with `Watch`. Each `JobUpdated` or `NameUpdated` event
 contains a complete snapshot of that entity. Replace the cached entity; do not
 interpret an update as a partial patch. Jobs are keyed by `id`, names by `label`.
 Apply `JobRemoved` and `NameRemoved` by removing the corresponding entity.
 
 `SnapshotComplete` marks the end of initial enumeration, including an empty data
 set. Keep mutations disabled until it arrives. The initial stream includes names
-and gateway state as well as data. `List`, `ListNames`, and `GetGateway` provide
+as well as data. `List` and `ListNames` provide
 unary snapshots when continuous observation is unnecessary.
 
 On disconnect, disable actions and clear or visibly mark stale state. Reconnect,
@@ -182,30 +182,6 @@ Display `Disabled`, `WaitingForJob`, `Publishing`, `Published`, and `Failed`
 according to `NameState`. Publication is asynchronous; a successful create/update
 response does not imply publication has completed. The daemon persists identities
 and targets and republishes records independently of any UI connection.
-
-## Gateway settings
-
-`GetGateway` returns a `GatewaySnapshot`; `SetGateway { config }` persists desired
-configuration and restarts or stops the gateway. Watch provides runtime updates.
-`GatewayConfig` contains `enabled`, a loopback HTTP listen address, and an optional
-IPv4 index server override. No override means the index servers listed by n0.
-
-Without saved settings, the gateway starts enabled on `127.0.0.1:45475`. An explicitly
-saved disabled setting is preserved.
-
-The gateway is embedded in the daemon process, uses its own iroh endpoint with zero listening ALPNs and its own
-resolver, and browses remote content without depending on the daemon's blob store.
-It stays running after the UI exits and starts with the daemon when enabled.
-Failures are reported and retried every 30 seconds. An explicit save can retry
-immediately. Only loopback HTTP listeners are accepted; the address refers to the
-daemon's machine, not necessarily the UI's machine.
-
-Distinguish desired configuration from observed `GatewayState`: `Disabled`,
-`Starting`, `Running { listen, endpoint }`, or `Failed { error }`. The actual listen
-address matters when configured with port zero. Saving successfully does not mean
-the listener is already running. Preserve unsaved edits while watch updates arrive;
-show runtime status independently. Configure the browser extension to use the
-reported HTTP address. The gateway does not provide a root homepage.
 
 ## Interaction principles
 

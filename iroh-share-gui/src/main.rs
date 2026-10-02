@@ -6,8 +6,8 @@ use anyhow::Context as _;
 use clap::Parser;
 use eframe::egui;
 use iroh_share_proto::{
-    client, BlobTicket, DiscoveryMode, DownloadSource, EndpointId, GatewayConfig, GatewaySnapshot,
-    GatewayState, Job, JobKind, JobState, Name, NameState, NameTarget, PairingTicket, WatchEvent,
+    client, BlobTicket, DiscoveryMode, DownloadSource, EndpointId, Job, JobKind, JobState, Name,
+    NameState, NameTarget, PairingTicket, WatchEvent,
 };
 use network::{Action, Update};
 use std::{collections::BTreeMap, path::PathBuf, time::Duration};
@@ -115,11 +115,6 @@ struct App {
     new_name_records: String,
     name_job: bool,
     editing_name: bool,
-    gateway: Option<GatewaySnapshot>,
-    gateway_enabled: bool,
-    gateway_listen: String,
-    gateway_index: String,
-    gateway_dirty: bool,
     local_paths: bool,
     /// Explicit same-filesystem choices per daemon; others follow the installer.
     local_daemons: BTreeMap<EndpointId, bool>,
@@ -223,11 +218,6 @@ impl App {
             ),
             name_job: true,
             editing_name: false,
-            gateway: None,
-            gateway_enabled: GatewayConfig::default().enabled,
-            gateway_listen: GatewayConfig::default().listen.to_string(),
-            gateway_index: String::new(),
-            gateway_dirty: false,
             local_paths: false,
             local_daemons,
             daemons,
@@ -329,8 +319,6 @@ impl App {
         }
         self.removal = None;
         self.clear_session();
-        self.gateway = None;
-        self.gateway_dirty = false;
         self.page = Page::Data;
         self.load_daemon(current);
         if current.is_some() {
@@ -357,18 +345,6 @@ impl App {
             }
             Err(e) => self.status = format!("Cannot send request: {e}"),
         }
-    }
-    fn sync_gateway(&mut self, snapshot: GatewaySnapshot) {
-        if !self.gateway_dirty {
-            self.gateway_enabled = snapshot.config.enabled;
-            self.gateway_listen = snapshot.config.listen.to_string();
-            self.gateway_index = snapshot
-                .config
-                .index_server
-                .map(|a| a.to_string())
-                .unwrap_or_default();
-        }
-        self.gateway = Some(snapshot);
     }
     fn poll(&mut self) {
         while let Ok(update) = self.local_rx.try_recv() {
@@ -458,7 +434,6 @@ impl App {
                         self.ready = true;
                         self.status = "Connected".into();
                     }
-                    WatchEvent::GatewayUpdated(snapshot) => self.sync_gateway(snapshot),
                 },
                 Update::ImportDirectory(path) => self.import_directory = Some(path),
                 Update::Imported { job, name_error } => {
@@ -533,17 +508,6 @@ impl App {
                 Update::ActionResult(message) => {
                     self.busy = false;
                     self.status = message;
-                }
-                Update::GatewaySaved(result) => {
-                    self.busy = false;
-                    match result {
-                        Ok(snapshot) => {
-                            self.gateway_dirty = false;
-                            self.sync_gateway(snapshot);
-                            self.status = "Gateway settings saved".into();
-                        }
-                        Err(e) => self.status = e,
-                    }
                 }
                 Update::Completion { id, result } => {
                     if id == self.completion_id {
@@ -1168,46 +1132,6 @@ impl App {
         }
         ui.weak("Enable folder selection, drag-and-drop sharing, and opening downloaded folders. Only enable this when both apps use the same filesystem.");
         ui.separator();
-        ui.heading("Gateway");
-        ui.label("Browse the content-addressed web. Runs inside the daemon with its own endpoint.");
-        ui.add_enabled_ui(self.ready && !self.busy, |ui| {
-            self.gateway_dirty |= ui
-                .checkbox(
-                    &mut self.gateway_enabled,
-                    "Enable gateway and start with daemon",
-                )
-                .changed();
-            ui.horizontal(|ui| {
-                ui.label("Listen address");
-                self.gateway_dirty |= ui.text_edit_singleline(&mut self.gateway_listen).changed();
-            });
-            ui.horizontal(|ui| {
-                ui.label("Index server (blank for discovery)");
-                self.gateway_dirty |= ui.text_edit_singleline(&mut self.gateway_index).changed();
-            });
-            if ui.button("Save / retry").clicked() {
-                match gateway_config(
-                    self.gateway_enabled,
-                    &self.gateway_listen,
-                    &self.gateway_index,
-                ) {
-                    Ok(config) => self.send(Action::SetGateway(config)),
-                    Err(e) => self.status = e,
-                }
-            }
-        });
-        if let Some(snapshot) = &self.gateway {
-            ui.label(match &snapshot.state {
-                GatewayState::Disabled => "Disabled".into(),
-                GatewayState::Starting => "Starting…".into(),
-                GatewayState::Running { listen, .. } => format!("Listening at http://{listen}"),
-                GatewayState::Failed { error } => {
-                    format!("Failed: {error}. Retrying every 30 seconds.")
-                }
-            });
-        }
-        ui.weak("The HTTP listener is on the daemon's loopback interface. Closing this app leaves the gateway running.");
-        ui.separator();
         ui.heading("Daemon");
         if let Some(id) = self.current {
             ui.label(format!("Endpoint ID: {id}"));
@@ -1741,31 +1665,6 @@ fn job_status(state: &JobState) -> String {
         JobState::Failed { error } => format!("Failed: {}", error.message),
     }
 }
-fn gateway_config(enabled: bool, listen: &str, index: &str) -> Result<GatewayConfig, String> {
-    let listen: std::net::SocketAddr = listen
-        .trim()
-        .parse()
-        .map_err(|e| format!("Invalid listen address: {e}"))?;
-    if !listen.ip().is_loopback() {
-        return Err("Gateway listen address must be loopback".into());
-    }
-    let index_server = if index.trim().is_empty() {
-        None
-    } else {
-        Some(
-            index
-                .trim()
-                .parse()
-                .map_err(|e| format!("Invalid index server: {e}"))?,
-        )
-    };
-    Ok(GatewayConfig {
-        enabled,
-        listen,
-        index_server,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1929,14 +1828,6 @@ mod tests {
         assert!(commands.try_recv().is_err());
     }
 
-    #[test]
-    fn gateway_form_rejects_public_bind_and_preserves_discovery() {
-        assert!(gateway_config(true, "0.0.0.0:8080", "").is_err());
-        let config = gateway_config(true, "[::1]:8080", " ").unwrap();
-        assert!(config.enabled);
-        assert!(config.index_server.is_none());
-        assert!(gateway_config(false, "127.0.0.1:8080", "invalid").is_err());
-    }
     fn fixture() -> (
         tempfile::TempDir,
         App,
@@ -2093,15 +1984,8 @@ mod tests {
         assert!(commands.try_recv().is_err());
     }
     #[test]
-    fn gateway_watch_preserves_draft_and_stale_completion_is_ignored() {
+    fn stale_completion_is_ignored() {
         let (_dir, mut app, tx, _) = fixture();
-        app.gateway_listen = "127.0.0.1:9000".into();
-        app.gateway_dirty = true;
-        tx.try_send(Update::Event(WatchEvent::GatewayUpdated(GatewaySnapshot {
-            config: GatewayConfig::default(),
-            state: GatewayState::Starting,
-        })))
-        .unwrap();
         app.completion_id = 2;
         tx.try_send(Update::Completion {
             id: 1,
@@ -2116,9 +2000,7 @@ mod tests {
         })
         .unwrap();
         app.poll();
-        assert_eq!(app.gateway_listen, "127.0.0.1:9000");
         assert!(app.candidates.is_empty());
-        assert!(matches!(app.gateway.unwrap().state, GatewayState::Starting));
     }
     #[test]
     fn renders_pairing_and_all_pages_and_gates_local_drops() {

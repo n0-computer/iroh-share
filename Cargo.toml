@@ -32,7 +32,6 @@ iroh-blobs = "0.103"
 n0-future = "0.3"
 walkdir = "2"
 blake3 = "1"
-iroh-link-gateway = { git = "https://github.com/n0-computer/iroh-content-discovery.git", rev = "e9df2cccddc4370d8e39adb4efe275e8bb4913f6" }
 iroh-mainline-endpoint-discovery = { git = "https://github.com/n0-computer/iroh-content-discovery.git", rev = "e9df2cccddc4370d8e39adb4efe275e8bb4913f6" }
 n0-mainline = "0.7.1"
 

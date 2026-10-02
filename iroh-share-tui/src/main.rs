@@ -3,7 +3,6 @@ mod daemons;
 mod links;
 mod model;
 mod network;
-mod settings;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -74,7 +73,6 @@ enum Input {
 struct App {
     model: Model,
     names_view: bool,
-    settings: settings::Page,
     daemons: daemons::Page,
     config_dir: PathBuf,
     /// The current daemon changed; the network worker must restart.
@@ -118,13 +116,6 @@ impl App {
                         job: Some(id),
                     };
                 }
-            }
-            Update::GatewaySaved(result) => {
-                self.busy = false;
-                self.settings.saved(result);
-            }
-            Update::Event(iroh_share_proto::WatchEvent::GatewayUpdated(snapshot)) => {
-                self.settings.receive(snapshot)
             }
             Update::Completion { id, result } => {
                 if let Input::Share(value) | Input::Target { value, .. } = &mut self.input {
@@ -182,7 +173,6 @@ impl App {
         self.server_id = current;
         self.reconnect = true;
         self.reset_session();
-        self.settings = settings::Page::default();
         self.names_view = false;
         match current {
             Some(_) => self.daemons.open = false,
@@ -281,28 +271,8 @@ impl App {
         if matches!(self.input, Input::Browse)
             && key.code == KeyCode::Char('m')
             && key.modifiers.is_empty()
-            && !self.settings.open
         {
             self.daemons.open = true;
-            return false;
-        }
-        if matches!(self.input, Input::Browse)
-            && (key.code == KeyCode::F(2) || key.code == KeyCode::Char(','))
-            && self.settings.editing.is_none()
-        {
-            self.settings.open = !self.settings.open;
-            return false;
-        }
-        if self.settings.open {
-            match self.settings.key(key, self.model.ready, self.busy) {
-                settings::Action::None => {}
-                settings::Action::Back => {
-                    self.settings.open = false;
-                    self.names_view = false;
-                }
-                settings::Action::Quit => return true,
-                settings::Action::Save(config) => self.submit(Action::SetGateway(config), tx),
-            }
             return false;
         }
         if matches!(self.input, Input::Browse)
@@ -364,7 +334,6 @@ impl App {
         if key.code == KeyCode::Tab && matches!(self.input, Input::Browse) {
             if self.names_view {
                 self.names_view = false;
-                self.settings.open = true;
             } else {
                 self.names_view = true;
                 self.model.raw_names = false;
@@ -586,10 +555,6 @@ impl App {
             self.daemons.paste(text);
             return;
         }
-        if self.settings.open {
-            self.settings.paste(text);
-            return;
-        }
         self.completion.reset();
         match &mut self.input {
             Input::Share(value)
@@ -736,10 +701,6 @@ impl App {
             self.daemons.draw(frame);
             return;
         }
-        if self.settings.open {
-            self.settings.draw(frame, self.model.ready);
-            return;
-        }
         let [heading, jobs, details, footer] = Layout::vertical([
             Constraint::Length(2),
             Constraint::Min(5),
@@ -834,7 +795,7 @@ impl App {
             .block(Block::bordered().title(if self.model.raw_names {
                 " Names · standalone URLs · N collapse "
             } else {
-                " Data · content names · Tab settings "
+                " Data · content names · Tab data "
             }))
             .row_highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
             .highlight_symbol("› ");
@@ -917,9 +878,9 @@ impl App {
         );
         frame.render_widget(
             Paragraph::new(format!(
-                "Tab {} · , Settings · m Daemons · N Names {} · D Downloads {}{} · q Quit",
+                "Tab {} · m Daemons · N Names {} · D Downloads {}{} · q Quit",
                 if self.names_view {
-                    "Settings"
+                    "Data"
                 } else {
                     "Content names"
                 },
@@ -1217,7 +1178,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, config_dir: PathBuf) -> Re
         loop {
             tokio::select! {
                 _ = tick.tick() => { terminal.draw(|frame| app.draw(frame))?;
-                    if terminal.size()?.height > 1 { links::draw_link(links::selected_url(&app.model, app.names_view).filter(|_| !app.settings.open).as_ref(), terminal.size()?.width)?; } }
+                    if terminal.size()?.height > 1 { links::draw_link(links::selected_url(&app.model, app.names_view).as_ref(), terminal.size()?.width)?; } }
                 Some(outcome) = link_results.recv() => { app.status = links::complete(outcome); }
                 Some(result) = paired_rx.recv() => app.paired(result),
                 update = updates_rx.recv() => { app.update(update.context("connection worker stopped")?); }
@@ -1225,7 +1186,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, config_dir: PathBuf) -> Re
                     Event::Key(key) => if app.key(key, &actions_tx) { return Ok(()); },
                     Event::Paste(text) => app.paste(text),
                     Event::Resize(_, _) => { terminal.draw(|frame| app.draw(frame))?;
-                    if terminal.size()?.height > 1 { links::draw_link(links::selected_url(&app.model, app.names_view).filter(|_| !app.settings.open).as_ref(), terminal.size()?.width)?; } }
+                    if terminal.size()?.height > 1 { links::draw_link(links::selected_url(&app.model, app.names_view).as_ref(), terminal.size()?.width)?; } }
                     _ => {}
                 }
             }
@@ -1406,39 +1367,14 @@ mod tests {
     }
 
     #[test]
-    fn settings_page_cycles_and_submits_daemon_configuration() -> Result<()> {
+    fn tab_toggles_between_data_and_content_names() {
         let mut app = App::default();
-        let (tx, mut rx) = mpsc::channel(8);
-        app.update(Update::Event(WatchEvent::GatewayUpdated(
-            iroh_share_proto::GatewaySnapshot {
-                config: iroh_share_proto::GatewayConfig {
-                    enabled: false,
-                    ..Default::default()
-                },
-                state: iroh_share_proto::GatewayState::Disabled,
-            },
-        )));
+        let (tx, _rx) = mpsc::channel(8);
         app.update(Update::Event(WatchEvent::SnapshotComplete));
         app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), &tx);
         assert!(app.names_view);
         app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), &tx);
-        assert!(app.settings.open);
-        app.key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE), &tx);
-        app.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE), &tx);
-        assert!(matches!(rx.try_recv(), Ok(Action::SetGateway(config)) if config.enabled));
-        let mut terminal = Terminal::new(TestBackend::new(110, 30))?;
-        terminal.draw(|frame| app.draw(frame))?;
-        let text: String = terminal
-            .backend()
-            .buffer()
-            .content
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect();
-        assert!(text.contains("Gateway enabled: yes"));
-        app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), &tx);
-        assert!(!app.settings.open && !app.names_view);
-        Ok(())
+        assert!(!app.names_view);
     }
 
     #[test]
