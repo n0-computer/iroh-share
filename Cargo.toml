@@ -41,5 +41,7 @@ ratatui = { version = "0.30", default-features = false, features = ["crossterm_0
 
 [patch.crates-io]
 # Until the next iroh-blobs release: logs why requests failed and why the
-# metadata db actor stopped (n0-computer/iroh-blobs#268).
-iroh-blobs = { git = "https://github.com/n0-computer/iroh-blobs", rev = "425ee37ec7bc2749acedfe3436a6dc46db32c256" }
+# metadata db actor stopped (n0-computer/iroh-blobs#268), respects the
+# per-request-type event modes (#270), and rejects observe requests by
+# default (#271, not merged yet).
+iroh-blobs = { git = "https://github.com/n0-computer/iroh-blobs", rev = "e65c93f35c13fd7633d56e134415752e7f378168" }
