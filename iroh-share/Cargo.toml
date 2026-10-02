@@ -38,7 +38,7 @@ tracing-subscriber.workspace = true
 iroh-share-proto = { workspace = true, features = ["client"] }
 
 [dev-dependencies]
-pkarr = { version = "3.10", default-features = false, features = ["signed_packet"] }
+pkarr = { version = "8.0", default-features = false, features = ["signed_packet"] }
 udp-addr-index = { git = "https://github.com/n0-computer/iroh-content-discovery.git", rev = "62b399fa39c710b6f3981273dc4a4153c6ac4811" }
 bao-tree = "0.16"
 tempfile.workspace = true
