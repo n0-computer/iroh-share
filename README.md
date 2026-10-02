@@ -193,7 +193,7 @@ Starting, Running, or Failed; failures retry every 30 seconds. Settings are save
 atomically in `STATE_DIR/gateway.json` and restored on daemon startup. The gateway
 is enabled by default on `127.0.0.1:45475`. An explicitly saved disabled setting is preserved. Closing the TUI does not stop it.
 
-The daemon embeds `iroh-local-gateway` as a library, with its own iroh endpoint and
+The daemon embeds `iroh-link-gateway` as a library, with its own iroh endpoint and
 Mainline resolver. It streams the content-addressed web through normal network
 protocols and does not access the daemon's blob store directly. Its separate endpoint
 can fetch content from the daemon like any other provider. Configure the companion

@@ -1,7 +1,7 @@
 //! Persist and supervise the embedded content-addressed web gateway.
 use anyhow::{Context, Result};
 use iroh::{endpoint::presets, Endpoint};
-use iroh_local_gateway::Gateway;
+use iroh_link_gateway::Gateway;
 use iroh_mainline_endpoint_discovery::{AddrIndex, Resolver};
 use iroh_share_proto::{GatewayConfig, GatewaySnapshot, GatewayState};
 use std::{
@@ -78,7 +78,7 @@ fn initial(config: &GatewayConfig) -> GatewaySnapshot {
     }
 }
 fn validate(config: &GatewayConfig) -> Result<()> {
-    iroh_local_gateway::validate_listen_addr(config.listen)?;
+    iroh_link_gateway::validate_listen_addr(config.listen)?;
     if let Some(server) = config.index_server {
         anyhow::ensure!(
             server.port() != 0
