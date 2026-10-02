@@ -2700,7 +2700,6 @@ dependencies = [
  "clap",
  "dirs",
  "hex",
- "hickory-proto",
  "iroh",
  "iroh-blobs",
  "iroh-mainline-endpoint-discovery",
@@ -2710,6 +2709,7 @@ dependencies = [
  "n0-future",
  "n0-mainline",
  "pkarr",
+ "pkarr-publish",
  "plist",
  "rand 0.10.3",
  "serde",
@@ -4251,6 +4251,22 @@ dependencies = [
  "serde",
  "simple-dns",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "pkarr-publish"
+version = "0.1.9"
+dependencies = [
+ "anyhow",
+ "clap",
+ "ed25519-dalek",
+ "hickory-proto",
+ "n0-mainline",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "z32",
 ]
 
 [[package]]

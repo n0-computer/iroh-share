@@ -197,7 +197,7 @@ impl Names {
             let (target, record) = match item {
                 Some(item) => {
                     // An unrenderable packet still republishes; only editing needs text.
-                    let text = crate::dns_records::text(key, item.value())
+                    let text = pkarr_publish::records::text(&key.0, item.value())
                         .unwrap_or_else(|error| format!("; records could not be shown: {error}\n"));
                     let record = Record {
                         url: None,
@@ -435,7 +435,7 @@ impl Names {
         };
         if let NameTarget::Records(text) = &entry.target {
             let key = SigningKey::from_bytes(&entry.secret);
-            let bytes = crate::dns_records::packet(NameKey(*key.verifying_key().as_bytes()), text)?;
+            let bytes = pkarr_publish::records::packet(key.verifying_key().as_bytes(), text)?;
             update_packet(&mut entry, None, bytes)?;
         } else if let Some(url) = desired(&entry.target, jobs) {
             update_record(&mut entry, url)?;
