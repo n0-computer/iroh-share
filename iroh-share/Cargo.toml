@@ -11,7 +11,7 @@ readme = "../README.md"
 keywords = ["iroh", "p2p", "file-sharing", "blake3", "content-addressed"]
 
 [dependencies]
-hickory-proto = { version = "0.25", default-features = false, features = ["text-parsing"] }
+pkarr-dir = { path = "../pkarr-dir" }
 zip = { version = "8", default-features = false, features = ["deflate"] }
 dirs.workspace = true
 serde.workspace = true

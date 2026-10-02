@@ -1,5 +1,4 @@
 mod control;
-mod dns_records;
 mod names;
 mod paths;
 mod recovery;

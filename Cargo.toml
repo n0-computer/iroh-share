@@ -1,5 +1,5 @@
 [workspace]
-members = ["iroh-share", "iroh-share-proto", "iroh-share-tui", "iroh-share-gui"]
+members = ["iroh-share", "iroh-share-proto", "iroh-share-tui", "iroh-share-gui", "pkarr-dir"]
 default-members = ["iroh-share"]
 resolver = "2"
 
