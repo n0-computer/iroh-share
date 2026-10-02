@@ -2709,7 +2709,7 @@ dependencies = [
  "n0-future",
  "n0-mainline",
  "pkarr",
- "pkarr-dir",
+ "pkarr-publish",
  "plist",
  "rand 0.10.3",
  "serde",
@@ -4254,7 +4254,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pkarr-dir"
+name = "pkarr-publish"
 version = "0.1.9"
 dependencies = [
  "anyhow",

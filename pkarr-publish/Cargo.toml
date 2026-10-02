@@ -1,5 +1,5 @@
 [package]
-name = "pkarr-dir"
+name = "pkarr-publish"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

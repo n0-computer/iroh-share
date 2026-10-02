@@ -9,7 +9,7 @@ use std::{
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use n0_mainline::{Dht, MutableItem};
-use pkarr_dir::{check_pair, entry, read_key, read_record, records, scan, sign, write_record};
+use pkarr_publish::{check_pair, entry, read_key, read_record, records, scan, sign, write_record};
 
 /// How often each record is republished.
 const REFRESH: Duration = Duration::from_secs(600);
@@ -130,7 +130,7 @@ async fn edit(dir: &Path, name: &str) -> Result<()> {
     };
     let key = read_key(&key_path)?;
     let public = *key.verifying_key().as_bytes();
-    let record_path = dir.join(format!("{name}.{}", pkarr_dir::RECORD_EXTENSION));
+    let record_path = dir.join(format!("{name}.{}", pkarr_publish::RECORD_EXTENSION));
     let previous = entry.record.as_deref().map(read_record).transpose()?;
     if let Some(previous) = &previous {
         check_pair(&key, previous)?;

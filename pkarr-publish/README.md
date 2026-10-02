@@ -1,4 +1,4 @@
-# pkarr-dir
+# pkarr-publish
 
 Edit and republish a directory of [pkarr] records.
 
@@ -14,10 +14,10 @@ without ever holding its key. If the server is compromised, an attacker can
 stop publishing, but cannot change the name.
 
 ```sh
-pkarr-dir list         # names, public keys, current versions
-pkarr-dir show <name>  # the records as zone-style text
-pkarr-dir edit <name>  # edit in $EDITOR, sign, publish once
-pkarr-dir daemon       # republish every record until stopped
+pkarr-publish list         # names, public keys, current versions
+pkarr-publish show <name>  # the records as zone-style text
+pkarr-publish edit <name>  # edit in $EDITOR, sign, publish once
+pkarr-publish daemon       # republish every record until stopped
 ```
 
 The directory is the current one, or `--dir` / `PKARR_DIR`.
@@ -41,7 +41,7 @@ no records. A key is just 32 random bytes:
 
 ```sh
 head -c 32 /dev/urandom > foo.key && chmod 600 foo.key
-pkarr-dir edit foo
+pkarr-publish edit foo
 ```
 
 `edit` signs with the current time as the sequence number, writes
