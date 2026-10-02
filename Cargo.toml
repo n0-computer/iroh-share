@@ -40,8 +40,9 @@ crossterm = { version = "0.29", features = ["event-stream"] }
 ratatui = { version = "0.30", default-features = false, features = ["crossterm_0_29", "layout-cache"] }
 
 [patch.crates-io]
-# Until the next iroh-blobs release: logs why requests failed and why the
-# metadata db actor stopped (n0-computer/iroh-blobs#268), respects the
-# per-request-type event modes (#270), and rejects observe requests by
-# default (#271, not merged yet).
+# Until the next iroh-blobs release. Most important is n0-computer/iroh-blobs#270:
+# without it, the provider decided every request type by the `get` mode, so
+# with `get: Notify` any peer could push blobs into our store. Also included:
+# logs why requests failed and why the metadata db actor stopped (#268), and
+# observe requests rejected by default (#271). #270 and #271 are not merged yet.
 iroh-blobs = { git = "https://github.com/n0-computer/iroh-blobs", rev = "e65c93f35c13fd7633d56e134415752e7f378168" }
