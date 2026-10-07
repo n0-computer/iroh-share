@@ -1,0 +1,5 @@
+# getrandom needs to be told which backend to use on wasm32-unknown-unknown.
+# "wasm_js" routes randomness to the browser's Web Crypto API, which iroh's key
+# generation relies on. Only affects iroh-share-web's browser build.
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

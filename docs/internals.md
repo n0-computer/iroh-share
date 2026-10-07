@@ -7,13 +7,15 @@ owns one iroh endpoint and one filesystem blob store shared by all transfers. It
 authenticated QUIC iRPC control API supports starting, listing, watching, and
 removing jobs.
 
-The Cargo workspace has four crates:
+The Cargo workspace has five crates:
 
 - `iroh-share-proto`: typed iRPC messages and state snapshots, with optional
   `client` helpers for native clients.
 - `iroh-share`: daemon and command-line client in one binary.
 - `iroh-share-tui`: Ratatui terminal interface using the same control protocol.
 - `iroh-share-gui`: egui desktop interface using the same control protocol.
+- `iroh-share-web`: browser interface, Rust compiled to WebAssembly, using the
+  same control protocol over a relay-only iroh endpoint.
 
 Normally, a shared Mainline publisher announces completed collections and retries
 on discovery failures. Direct ticket transfers work independently of Mainline.

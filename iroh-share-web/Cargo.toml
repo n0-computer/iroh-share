@@ -1,0 +1,45 @@
+[package]
+name = "iroh-share-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Browser interface (Rust + WebAssembly) for the iroh-share daemon"
+readme = "README.md"
+publish = false
+
+# cdylib: the wasm artifact the browser loads. rlib: lets it also build natively,
+# so workspace checks cover it.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Pin to the installed wasm-bindgen CLI; crate and CLI versions must match exactly.
+wasm-bindgen = "=0.2.126"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Window", "Storage", "Location", "History"] }
+console_error_panic_hook = "0.1.7"
+# Browsers have no UDP sockets, so this endpoint is relay-only.
+iroh.workspace = true
+iroh-tickets = "1"
+iroh-share-proto.workspace = true
+irpc.workspace = true
+irpc-iroh.workspace = true
+n0-future.workspace = true
+tokio = { version = "1", default-features = false, features = ["sync", "macros"] }
+serde.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+z32.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-subscriber-wasm = "0.1.0"
+
+# wasm32 has no OS RNG; getrandom routes to Web Crypto (see .cargo/config.toml).
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
+[dev-dependencies]
+iroh-blobs.workspace = true

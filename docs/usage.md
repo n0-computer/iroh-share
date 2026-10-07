@@ -45,6 +45,17 @@ enable **The daemon is on this computer** in Settings to choose folders, share
 files/folders by dropping them into the window, and open seeded paths in the
 system file manager. This setting is saved separately for each daemon. Closing the GUI leaves the daemon running.
 
+## Browser UI
+
+`iroh-share-web` is an experimental browser version of the desktop GUI. Build it
+with `npm run build` in `iroh-share-web/` and serve the resulting
+`dist/iroh-share/` directory as static files (`npm run serve` for
+http://localhost:8080/iroh-share/). Pair it
+with a daemon ticket like the desktop app. It runs entirely in the browser and
+reaches the daemon through an iroh relay; it has no access to local files, so it
+shares paths on the daemon and imports tickets, but cannot pick or drop folders.
+See [its README](../iroh-share-web/README.md).
+
 Frontend capabilities and protocol behavior are described in
 [the UI capability guide](../iroh-share-proto/UI.md) and
 [shared UX foundations](../iroh-share-proto/UX.md). Layouts may differ; workflows agree.

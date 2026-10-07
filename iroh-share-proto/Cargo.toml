@@ -21,7 +21,7 @@ iroh.workspace = true
 
 [features]
 default = []
-client = ["dep:anyhow", "dep:dirs", "dep:tokio", "dep:irpc-iroh", "dep:serde_json", "dep:rand"]
+client = ["iroh/default", "dep:anyhow", "dep:dirs", "dep:tokio", "dep:irpc-iroh", "dep:serde_json", "dep:rand"]
 
 [dependencies.anyhow]
 workspace = true
