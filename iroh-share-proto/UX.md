@@ -75,6 +75,10 @@ The GUI exposes Import ticket and per-row Update from ticket, Add name,
 Copy ticket, and eligible Refresh directory actions. Standalone names and
 ordinary downloads use disclosure sections.
 
+The browser frontend follows the GUI layout and wording. It has no local
+filesystem access: no folder pickers, folder drops, Open directory or Refresh.
+Ticket file drops and pasted tickets work as in the GUI.
+
 The TUI uses s to publish a path, i to import a ticket, u to update selected data,
 r to refresh, n to name data, and t to copy a ticket. Tab opens Data's content-name
 view; e retargets a name, with path selection for data targets. N expands/collapses

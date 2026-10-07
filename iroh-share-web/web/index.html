@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Iroh Share</title>
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./style.css" />
+    <script src="./main.js" type="module"></script>
+  </head>
+  <body>
+    <!-- Pairing: shown until a daemon is saved, and from "Add daemon…". -->
+    <section id="pairing" class="pairing" hidden>
+      <h1 id="pairing-title">Connect to Iroh Share</h1>
+      <p>
+        Paste the one-time ticket printed by your daemon. The daemon is saved and can be
+        switched from the menu.
+      </p>
+      <input id="pair-ticket" type="text" placeholder="Pairing ticket" autocomplete="off" spellcheck="false" />
+      <input id="pair-name" type="text" placeholder="Name (optional), e.g. NAS" autocomplete="off" />
+      <div class="row">
+        <button id="pair-connect" type="button">Connect</button>
+        <button id="pair-cancel" type="button" hidden>Cancel</button>
+      </div>
+    </section>
+
+    <div id="app" class="app" hidden>
+      <header class="top">
+        <strong>Iroh Share</strong>
+        <details id="daemon-menu" class="menu">
+          <summary id="daemon-title">Daemon: —</summary>
+          <div class="menu-list" id="daemon-list"></div>
+        </details>
+        <nav class="tabs">
+          <button type="button" data-page="data" class="tab">Data</button>
+          <button type="button" data-page="settings" class="tab">Settings</button>
+        </nav>
+      </header>
+
+      <main id="page-data">
+        <details class="panel" open>
+          <summary>Content</summary>
+          <div class="scroll">
+            <table class="grid" id="data-table">
+              <thead>
+                <tr>
+                  <th class="c-path">Path</th>
+                  <th class="c-state">State / progress</th>
+                  <th class="c-links">Public links / names</th>
+                  <th class="c-actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="jobs"></tbody>
+              <tbody>
+                <!-- Add content: creation fields live directly in the last row. -->
+                <tr class="add-row">
+                  <td>
+                    <div class="mode-share mode-download path-field">
+                      <input id="add-path" type="text" placeholder="Path on the daemon · Tab to complete" autocomplete="off" spellcheck="false" />
+                      <ul class="candidates" id="candidates" hidden></ul>
+                    </div>
+                    <input class="mode-import" id="add-ticket" type="text" placeholder="Paste a ticket" autocomplete="off" spellcheck="false" />
+                  </td>
+                  <td>
+                    <select id="add-mode">
+                      <option value="share">Share a path</option>
+                      <option value="import">Import ticket</option>
+                      <option value="download">Download</option>
+                    </select>
+                    <div id="updating" class="weak"></div>
+                  </td>
+                  <td>
+                    <label class="mode-share"><input id="add-include-dir" type="checkbox" /> Include directory name</label>
+                    <input class="mode-download" id="add-source" type="text" placeholder="URL, hash, or ticket" autocomplete="off" spellcheck="false" />
+                    <label class="mode-download"><input id="add-discover" type="checkbox" /> Also discover providers</label>
+                  </td>
+                  <td>
+                    <div class="row">
+                      <button id="add-submit" type="button">Add</button>
+                      <button id="add-cancel" type="button" hidden>Cancel</button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div id="other-names" hidden>
+          <h3>Other content names</h3>
+          <div class="scroll">
+            <table class="grid">
+              <thead>
+                <tr>
+                  <th class="c-name">Name</th>
+                  <th class="c-records">DNS records</th>
+                  <th class="c-actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="other-names-body"></tbody>
+            </table>
+          </div>
+        </div>
+        </details>
+
+        <details class="panel" id="names-panel">
+          <summary>Names</summary>
+          <div class="row">
+            <button id="export-all" type="button" title="Save a ZIP containing all public keys, private signing keys, and current records, including names attached to content.">Export all pkarr names…</button>
+            <button id="import-names" type="button" title="Restore names from an exported ZIP. Keys this daemon already manages are skipped.">Import pkarr names…</button>
+            <input id="import-file" type="file" accept=".zip,application/zip" hidden />
+          </div>
+          <div class="scroll">
+            <table class="grid">
+              <thead>
+                <tr>
+                  <th class="c-name">Name</th>
+                  <th class="c-records">DNS records</th>
+                  <th class="c-actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="names-body"></tbody>
+            </table>
+          </div>
+        </details>
+      </main>
+
+      <main id="page-settings" hidden>
+        <h2>Settings</h2>
+        <p id="import-directory"></p>
+        <hr />
+        <h2>Daemon</h2>
+        <div id="daemon-settings">
+          <p>Endpoint ID: <code id="daemon-id"></code></p>
+          <div class="row">
+            <label for="daemon-name">Name</label>
+            <input id="daemon-name" type="text" autocomplete="off" />
+            <button id="daemon-rename" type="button">Save name</button>
+          </div>
+          <p><button id="daemon-forget" type="button">Forget this daemon…</button></p>
+        </div>
+        <p class="weak">Switch daemons or add another from the daemon menu at the top.</p>
+        <p>This browser's endpoint ID: <code id="client-id"></code></p>
+        <p class="weak">
+          The browser keeps its identity key in this site's local storage. Clearing site data
+          removes it, and the daemons must pair this browser again.
+        </p>
+      </main>
+    </div>
+
+    <dialog id="confirm">
+      <h3>Confirm removal</h3>
+      <p id="confirm-text"></p>
+      <div class="row">
+        <button id="confirm-ok" type="button">Remove</button>
+        <button id="confirm-cancel" type="button">Cancel</button>
+      </div>
+    </dialog>
+
+    <footer class="status">
+      <span id="status">Loading…</span>
+      <span id="spinner" class="spinner" hidden></span>
+    </footer>
+  </body>
+</html>

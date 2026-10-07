@@ -7,6 +7,49 @@ choose their own layout and supported features; they do not need identical scree
 or synchronized feature sets. The Rust types in `src/lib.rs`, `src/names.rs`,
 `src/download.rs`, and `src/pairing.rs` define the wire contract.
 
+## Frontends
+
+Three frontends use this protocol. Keep them in sync: when a workflow, wording or
+rule changes in one, change the others or record the gap in the table below.
+
+- `iroh-share-gui`: egui desktop app. The reference for layout and wording.
+- `iroh-share-tui`: terminal app; keyboard driven, paste and path completion
+  instead of drag and drop.
+- `iroh-share-web`: browser app, Rust compiled to WebAssembly. Its state machine
+  (`src/app.rs`) is a port of the desktop GUI's `App`, and `src/view.rs` holds
+  the same status texts, link formatting and enable rules. `web/main.js` only
+  renders the view and performs browser effects. Port GUI changes to these files.
+
+| Capability | GUI | TUI | Web |
+| --- | --- | --- | --- |
+| Pairing, several saved daemons, rename/forget | yes | yes | yes |
+| Share a daemon path, Tab completion | yes | yes | yes |
+| Native file/folder pickers, folder drops, Open directory | same-filesystem setting | no | no |
+| Refresh a named shared directory | same-filesystem setting | yes | no |
+| Import ticket (paste, `.ticket`/`.sendme` drop) | yes | paste | yes |
+| Update from ticket, Download | yes | yes | yes |
+| Content names, standalone DNS-record names | yes | yes | yes |
+| Export/import pkarr name archives | yes | no (CLI: `names`) | yes |
+| Copy ticket/hash/URLs, open URLs | yes | ticket and URLs | yes |
+
+Browser specifics:
+
+- The endpoint is relay-only; browsers have no UDP sockets. The daemon must be
+  reachable through a relay, which the default iroh presets provide.
+- The identity key and the saved daemon list live in the site's local storage.
+  Clearing site data loses the identity, and daemons must pair the browser again.
+- A pairing ticket can be passed in the URL fragment (`#ticket=…`), which is
+  never sent to the server. The page removes it from the address bar at once and
+  shows it for review; it is not stored.
+- Browser drops supply file contents, not daemon paths, so only ticket files are
+  accepted. There is no same-filesystem setting, and therefore no Refresh, folder
+  pickers or Open directory.
+- Name archives are read and saved through the browser's file dialogs.
+
+`iroh-share-proto` must keep building for `wasm32-unknown-unknown`. It depends on
+`iroh` and `iroh-blobs` without their default features; the native-only `client`
+feature (files, tokio runtime) enables them. CI builds `iroh-share-web` for wasm.
+
 ## Connection and identity
 
 A client owns its endpoint secret key and configuration directory. It does not need
@@ -66,7 +109,8 @@ accept file/folder drops or native selection and offer a name during publication
 On a remote setup, accept a sendme collection ticket through a paste field or a
 `.ticket`/`.sendme` text file drop. Present a review before starting a ticket import.
 Native desktop backends may expose file drops without exposing dragged text;
-pasting remains available. Ticket-file reads use the client's filesystem and do
+pasting remains available. Browsers expose dropped file contents but never daemon
+paths, so a browser frontend accepts ticket files only. Ticket-file reads use the client's filesystem and do
 not require the same-filesystem setting; publishing a dropped folder does.
 
 `Import { source, id: None }` fetches, exports and seeds content in a fresh folder

@@ -26,8 +26,8 @@ irpc-iroh.workspace = true
 rand.workspace = true
 hex.workspace = true
 tokio.workspace = true
-iroh.workspace = true
-iroh-blobs.workspace = true
+iroh = { workspace = true, features = ["default"] }
+iroh-blobs = { workspace = true, features = ["default"] }
 n0-future.workspace = true
 walkdir.workspace = true
 blake3.workspace = true
