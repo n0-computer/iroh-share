@@ -2513,8 +2513,8 @@ dependencies = [
 
 [[package]]
 name = "iroh-blobs"
-version = "0.103.0"
-source = "git+https://github.com/n0-computer/iroh-blobs?rev=e65c93f35c13fd7633d56e134415752e7f378168#e65c93f35c13fd7633d56e134415752e7f378168"
+version = "0.103.1"
+source = "git+https://github.com/n0-computer/iroh-blobs?rev=8368de668ac67e85c9134c4386b17f20b87a6e05#8368de668ac67e85c9134c4386b17f20b87a6e05"
 dependencies = [
  "arrayvec",
  "bao-tree",
