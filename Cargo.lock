@@ -2770,7 +2770,7 @@ version = "0.1.10"
 dependencies = [
  "anyhow",
  "arboard",
- "base64 0.22.1",
+ "base64 0.23.1",
  "clap",
  "crossterm",
  "dirs",
