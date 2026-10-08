@@ -9,7 +9,7 @@ description = "Desktop interface for the iroh-share daemon"
 readme = "../README.md"
 
 [dependencies]
-eframe = { version = "0.33", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "persistence"] }
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "persistence"] }
 rfd = "0.17"
 open = "5"
 anyhow.workspace = true
