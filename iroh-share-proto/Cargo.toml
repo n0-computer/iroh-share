@@ -21,7 +21,7 @@ iroh.workspace = true
 
 [features]
 default = []
-client = ["dep:anyhow", "dep:dirs", "dep:tokio", "dep:irpc-iroh", "dep:serde_json", "dep:rand"]
+client = ["dep:anyhow", "dep:dirs", "dep:tokio", "dep:irpc-iroh", "dep:serde_json", "dep:rand", "dep:rustix"]
 
 [dependencies.anyhow]
 workspace = true
@@ -42,6 +42,9 @@ optional = true
 [dependencies.rand]
 workspace = true
 optional = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+rustix = { version = "1", features = ["fs"], optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

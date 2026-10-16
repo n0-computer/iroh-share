@@ -374,6 +374,28 @@ impl ControlClient {
     }
 }
 
+// Publish a complete identity without replacing a concurrent winner.
+fn publish_identity(temporary: &Path, path: &Path) -> std::io::Result<()> {
+    #[cfg(target_os = "android")]
+    {
+        // Android may deny hard links even in private app storage. Keep atomic
+        // publication of the synced temporary file, without clobbering a winner.
+        // Unsupported kernels/filesystems return an error; never use plain rename.
+        rustix::fs::renameat_with(
+            rustix::fs::CWD,
+            temporary,
+            rustix::fs::CWD,
+            path,
+            rustix::fs::RenameFlags::NOREPLACE,
+        )
+        .map_err(std::io::Error::from)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        std::fs::hard_link(temporary, path)
+    }
+}
+
 /// Atomically create a private identity file; concurrent clients use the winner.
 pub fn load_or_create_key(path: &Path) -> Result<SecretKey> {
     fn read(path: &Path) -> Result<SecretKey> {
@@ -401,7 +423,7 @@ pub fn load_or_create_key(path: &Path) -> Result<SecretKey> {
         let mut file = options.open(&temporary)?;
         file.write_all(&rand::random::<[u8; 32]>())?;
         file.sync_all()?;
-        match std::fs::hard_link(&temporary, path) {
+        match publish_identity(&temporary, path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
             Err(error) => Err(error.into()),
@@ -753,13 +775,47 @@ mod tests {
         Ok(())
     }
     #[test]
+    fn identity_publication_never_overwrites_an_existing_target() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let temporary = root.path().join("candidate");
+        let path = root.path().join("winner");
+        std::fs::write(&temporary, [1u8; 32])?;
+        std::fs::write(&path, [2u8; 32])?;
+        let error = publish_identity(&temporary, &path).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&path)?, [2u8; 32]);
+        assert_eq!(std::fs::read(&temporary)?, [1u8; 32]);
+        Ok(())
+    }
+
+    #[test]
+    fn failed_identity_publication_keeps_the_source() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let temporary = root.path().join("candidate");
+        let path = root.path().join("missing/winner");
+        std::fs::write(&temporary, [1u8; 32])?;
+        assert_eq!(
+            publish_identity(&temporary, &path).unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
+        assert_eq!(std::fs::read(&temporary)?, [1u8; 32]);
+        assert!(!path.exists());
+        Ok(())
+    }
+
+    #[test]
     fn concurrent_identity_creation_never_replaces_a_key() -> Result<()> {
         let root = tempfile::tempdir()?;
         let path = root.path().join("key");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
         let threads: Vec<_> = (0..8)
             .map(|_| {
                 let path = path.clone();
-                std::thread::spawn(move || load_or_create_key(&path).unwrap().public())
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    load_or_create_key(&path).unwrap().public()
+                })
             })
             .collect();
         let ids: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
