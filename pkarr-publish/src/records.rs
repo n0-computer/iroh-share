@@ -1,14 +1,20 @@
-//! Parse one zone-style DNS record per line without filesystem directives.
+//! Zone-style DNS records, one per line, converted to and from DNS packets.
+//!
+//! Owners are relative to the pkarr name (`@` is the name itself). Zone
+//! directives such as `$INCLUDE` are rejected, so text from elsewhere cannot
+//! read files.
 use anyhow::{bail, ensure, Context, Result};
 use hickory_proto::{
     op::{Message, MessageType},
     rr::{rdata::NULL, Name, RData, Record, RecordType},
     serialize::txt::{Parser, RDataParser},
 };
-use iroh_share_proto::NameKey;
 
-pub fn packet(key: NameKey, text: &str) -> Result<Vec<u8>> {
-    let origin: Name = format!("{key}.").parse()?;
+/// Parses the records in `text` into a DNS packet for the name `key`.
+///
+/// Empty lines and lines starting with `;` are ignored.
+pub fn packet(key: &[u8; 32], text: &str) -> Result<Vec<u8>> {
+    let origin = origin(key)?;
     let mut packet = Message::new();
     packet.set_message_type(MessageType::Response);
     for (index, line) in text.lines().enumerate() {
@@ -87,9 +93,9 @@ pub fn packet(key: NameKey, text: &str) -> Result<Vec<u8>> {
 }
 
 /// Renders a DNS packet as the zone-style lines [`packet`] accepts.
-pub fn text(key: NameKey, bytes: &[u8]) -> Result<String> {
+pub fn text(key: &[u8; 32], bytes: &[u8]) -> Result<String> {
     use std::fmt::Write;
-    let origin: Name = format!("{key}.").parse()?;
+    let origin = origin(key)?;
     let message = Message::from_vec(bytes)?;
     let mut text = String::new();
     for record in message.answers() {
@@ -131,6 +137,11 @@ pub fn text(key: NameKey, bytes: &[u8]) -> Result<String> {
     Ok(text)
 }
 
+/// The name of `key` as a fully qualified domain name.
+fn origin(key: &[u8; 32]) -> Result<Name> {
+    Ok(format!("{}.", z32::encode(key)).parse()?)
+}
+
 /// Quotes a character string, escaping what the zone parser would interpret.
 fn quote(bytes: &[u8]) -> String {
     let mut quoted = String::from('"');
@@ -153,10 +164,10 @@ mod tests {
     use super::*;
     #[test]
     fn rendered_records_parse_back_to_the_same_packet() -> Result<()> {
-        let key = NameKey([5; 32]);
+        let key = &[5; 32];
         let text = "@ 300 IN A 192.0.2.1\n@ 300 IN AAAA 2001:db8::1\n@ 300 IN MX 10 mail.example.com.\n@ 300 IN TXT \"hello world\"\nwww 300 IN CNAME example.com.\n_sip._tcp 300 IN SRV 0 1 443 example.com.\n@ 300 IN HTTPS 1 example.com. port=8443\n@ 300 IN TXT \"a\\\"b\" \"c d\"\n";
-        let uri = iroh_share_proto::redirect_records(&"https://example.com/path?q=1".parse()?);
-        let bytes = packet(key, &(text.to_owned() + &uri))?;
+        let uri = "_https._tcp 300 IN URI 0 0 \"https://example.com/path?q=1\"\n";
+        let bytes = packet(key, &(text.to_owned() + uri))?;
         let rendered = super::text(key, &bytes)?;
         assert_eq!(packet(key, &rendered)?, bytes, "{rendered}");
         assert!(rendered.contains("www 300 IN CNAME"), "{rendered}");
@@ -164,25 +175,25 @@ mod tests {
     }
     #[test]
     fn parses_common_records_and_uri_with_relative_owners() -> Result<()> {
-        let key = NameKey([5; 32]);
+        let key = &[5; 32];
         let text = "@ 300 IN A 192.0.2.1\n@ 300 IN AAAA 2001:db8::1\n@ 300 IN MX 10 mail.example.com.\n@ 300 IN TXT \"hello world\"\nwww 300 IN CNAME example.com.\n_sip._tcp 300 IN SRV 0 1 443 example.com.\n@ 300 IN HTTPS 0 example.com.\n";
-        let uri = iroh_share_proto::redirect_records(&"https://example.com/path?q=1".parse()?);
-        let bytes = packet(key, &(text.to_owned() + &uri))?;
-        let decoded = simple_dns::Packet::parse(&bytes)?;
-        assert_eq!(decoded.answers.len(), 8);
-        assert!(decoded
-            .answers
+        let uri = "_https._tcp 300 IN URI 0 0 \"https://example.com/path?q=1\"\n";
+        let bytes = packet(key, &(text.to_owned() + uri))?;
+        let decoded = Message::from_vec(&bytes)?;
+        let names: Vec<_> = decoded
+            .answers()
             .iter()
-            .all(|rr| rr.name.to_string().ends_with(&key.to_string())));
-        assert!(decoded
-            .answers
-            .iter()
-            .any(|rr| rr.name.to_string() == format!("_https._tcp.{key}")));
+            .map(|rr| rr.name().to_string())
+            .collect();
+        let key = z32::encode(key);
+        assert_eq!(names.len(), 8);
+        assert!(names.iter().all(|name| name.ends_with(&format!("{key}."))));
+        assert!(names.contains(&format!("_https._tcp.{key}.")));
         Ok(())
     }
     #[test]
     fn rejects_bad_oversized_and_external_records() {
-        let key = NameKey([5; 32]);
+        let key = &[5; 32];
         for text in [
             "",
             "$INCLUDE /etc/passwd",

@@ -1,0 +1,21 @@
+[package]
+name = "pkarr-publish"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Edit and republish a directory of pkarr records"
+readme = "README.md"
+
+[dependencies]
+anyhow.workspace = true
+clap = { workspace = true, features = ["env"] }
+ed25519-dalek = "3"
+hickory-proto = { version = "0.25", default-features = false, features = ["text-parsing"] }
+n0-mainline.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+z32.workspace = true
