@@ -2794,6 +2794,7 @@ dependencies = [
  "irpc",
  "postcard",
  "rand 0.10.3",
+ "rustix 1.1.4",
  "serde",
  "serde_json",
  "subtle",
