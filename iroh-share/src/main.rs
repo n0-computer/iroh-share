@@ -1085,7 +1085,7 @@ mod tests {
             .bind()
             .await?;
         let access = control::Access::load(temp.path(), control_client.id())?;
-        let client = irpc_iroh::client::<ControlProtocol>(
+        let client = irpc::Client::<ControlProtocol>::iroh(
             control_client.clone(),
             endpoint.addr(),
             iroh_share_proto::CONTROL_ALPN,
