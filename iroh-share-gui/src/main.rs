@@ -1223,26 +1223,20 @@ impl eframe::App for App {
             .collect();
         storage.set_string("local_daemons", local.join(" "));
     }
-    fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
-        self.ui(ctx);
+    fn ui(&mut self, ui: &mut egui::Ui, _: &mut eframe::Frame) {
+        self.show(ui);
     }
 }
 impl App {
-    fn handle_drop(&mut self, dropped: Vec<egui::DroppedFile>) {
+    fn handle_drop(&mut self, dropped: Vec<egui::DroppedFileHandle>) {
         if !self.ready || self.busy {
             self.status =
                 "Drop ignored: wait until connected and the current request finishes.".into();
             return;
         }
         let ticket_file = dropped.iter().position(|f| {
-            let name = f
-                .path
-                .as_ref()
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_else(|| f.name.clone());
-            name.ends_with(".ticket")
-                || name.ends_with(".sendme")
-                || (f.path.is_none() && f.mime == "text/plain")
+            let name = f.path().to_string_lossy();
+            name.ends_with(".ticket") || name.ends_with(".sendme")
         });
         if let Some(index) = ticket_file {
             if !self.import_open {
@@ -1258,16 +1252,18 @@ impl App {
             self.runtime.spawn_blocking(move || {
                 use std::io::Read;
                 let result = (|| -> anyhow::Result<String> {
-                    let bytes = if let Some(path) = file.path {
+                    // A relative path is only a file name: the drop has no
+                    // filesystem path, so read its contents instead.
+                    let bytes = if file.path().is_absolute() {
                         let mut bytes = Vec::new();
-                        std::fs::File::open(path)?
+                        std::fs::File::open(file.path())?
                             .take(16_385)
                             .read_to_end(&mut bytes)?;
                         bytes
                     } else {
-                        file.bytes
+                        file.bytes()
+                            .map_err(anyhow::Error::msg)
                             .context("Ticket has no readable contents")?
-                            .to_vec()
                     };
                     anyhow::ensure!(bytes.len() <= 16_384, "Ticket file is too large");
                     let text = String::from_utf8(bytes)?.trim().to_owned();
@@ -1282,7 +1278,11 @@ impl App {
         } else if !self.local_paths {
             self.status = "For a remote daemon, paste a ticket or drop a .ticket file. Local folders require the same-filesystem setting.".into();
         } else {
-            let paths: Vec<_> = dropped.into_iter().filter_map(|f| f.path).collect();
+            let paths: Vec<_> = dropped
+                .iter()
+                .map(|f| f.path().to_path_buf())
+                .filter(|path| path.is_absolute())
+                .collect();
             if paths.is_empty() {
                 self.status = "This drop has no filesystem paths. Paste a ticket instead.".into();
             } else {
@@ -1323,10 +1323,12 @@ impl App {
         }
     }
 
-    fn ui(&mut self, ctx: &egui::Context) {
+    fn show(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        let ctx = &ctx;
         self.poll();
         ctx.request_repaint_after(Duration::from_millis(100));
-        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
+        egui::Panel::bottom("status").show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.label(&self.status);
                 if self.busy {
@@ -1335,7 +1337,7 @@ impl App {
             });
         });
         if self.pairing {
-            egui::CentralPanel::default().show(ctx, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 ui.heading(if self.daemons.is_empty() { "Connect to Iroh Share" } else { "Add a daemon" });
                 ui.label("Paste the one-time ticket printed by your daemon. The daemon is saved and can be switched from the menu.");
                 ui.add_enabled_ui(!self.busy, |ui| {
@@ -1354,7 +1356,7 @@ impl App {
             });
             return;
         }
-        egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
+        egui::Panel::top("tabs").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.strong("Iroh Share");
                 self.daemon_menu(ui);
@@ -1366,7 +1368,7 @@ impl App {
                 }
             });
         });
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::vertical()
                 .id_salt("page_scroll")
                 .show(ui, |ui| match self.page {
@@ -1498,7 +1500,7 @@ fn row_line<R>(ui: &mut egui::Ui, contents: impl FnOnce(&mut egui::Ui) -> R) -> 
     .inner
 }
 
-fn dns_editor(ui: &mut egui::Ui, id: impl std::hash::Hash, text: &mut String) {
+fn dns_editor(ui: &mut egui::Ui, id: impl std::hash::Hash + std::fmt::Debug, text: &mut String) {
     egui::ScrollArea::horizontal()
         .id_salt(("dns_editor_scroll", &id))
         .max_width(560.0)
@@ -1551,7 +1553,7 @@ fn copy_value(ui: &mut egui::Ui, value: &str, label: &str, kind: &str) -> bool {
 }
 /// An icon that copies `value`, and shows a check mark for two seconds after.
 fn copy_icon(ui: &mut egui::Ui, icon: Icon, value: &str, label: &str) {
-    let id = ui.id().with(("copied", label, value));
+    let id = ui.scope_id().with(("copied", label, value));
     let now = ui.input(|i| i.time);
     let copied = ui
         .ctx()
@@ -1575,7 +1577,7 @@ fn copy_button(
     kind: &str,
     button: impl FnOnce(bool) -> egui::Button<'static>,
 ) -> egui::Response {
-    let id = ui.id().with(("copied", kind, value));
+    let id = ui.scope_id().with(("copied", kind, value));
     let now = ui.input(|i| i.time);
     let copied = ui
         .ctx()
@@ -1611,9 +1613,7 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
     let response = ui
         .add(egui::Button::new("").min_size(egui::vec2(24.0, 24.0)))
         .on_hover_text(label);
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
-    });
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     if ui.is_rect_visible(response.rect) {
         let painter = ui.painter();
         let stroke = ui.style().interact(&response).fg_stroke;
@@ -1834,6 +1834,43 @@ fn job_status(state: &JobState) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Runs one headless frame and discards its texture updates, which no renderer applies here.
+    fn run_ui(
+        ctx: &egui::Context,
+        input: egui::RawInput,
+        run: impl FnMut(&mut egui::Ui),
+    ) -> egui::FullOutput {
+        let mut output = ctx.run_ui(input, run);
+        output.textures_delta.clear();
+        output
+    }
+
+    /// A dropped file with fixed contents; a relative path is a drop without a filesystem path.
+    #[derive(Debug)]
+    struct TestDrop {
+        path: PathBuf,
+        bytes: Vec<u8>,
+    }
+
+    impl TestDrop {
+        fn handle(path: &str, contents: String) -> egui::DroppedFileHandle {
+            std::sync::Arc::new(Self {
+                path: path.into(),
+                bytes: contents.into_bytes(),
+            })
+        }
+    }
+
+    impl egui::DroppedFile for TestDrop {
+        fn path(&self) -> &std::path::Path {
+            &self.path
+        }
+        fn bytes(&self) -> Result<Vec<u8>, String> {
+            Ok(self.bytes.clone())
+        }
+    }
+
     #[test]
     fn compact_values_copy_the_original_without_opening() {
         for (value, kind) in [
@@ -1856,8 +1893,8 @@ mod tests {
                 )),
                 ..Default::default()
             };
-            let _ = ctx.run(input(), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let _ = run_ui(&ctx, input(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     rect = ui
                         .horizontal(|ui| {
                             copy_value(ui, &value, &label, kind);
@@ -1883,8 +1920,8 @@ mod tests {
                     modifiers: Default::default(),
                 },
             ];
-            let result = ctx.run(click, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let result = run_ui(&ctx, click, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     ui.horizontal(|ui| {
                         copy_value(ui, &value, &label, kind);
                     });
@@ -1894,7 +1931,7 @@ mod tests {
                 .platform_output
                 .commands
                 .iter()
-                .any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &value)));
+                .any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &*value)));
             assert!(!result
                 .platform_output
                 .commands
@@ -1952,11 +1989,7 @@ mod tests {
             discovery: DiscoveryMode::Mainline,
         };
         // A bare hash is not a ticket.
-        app.handle_drop(vec![egui::DroppedFile {
-            name: "bad.ticket".into(),
-            bytes: Some(source.to_string().into_bytes().into()),
-            ..Default::default()
-        }]);
+        app.handle_drop(vec![TestDrop::handle("bad.ticket", source.to_string())]);
         for _ in 0..100 {
             app.poll();
             if app.status.starts_with("Cannot read ticket") {
@@ -1976,11 +2009,7 @@ mod tests {
             source.hash_and_format().format,
         )
         .to_string();
-        app.handle_drop(vec![egui::DroppedFile {
-            name: "valid.ticket".into(),
-            bytes: Some(ticket.clone().into_bytes().into()),
-            ..Default::default()
-        }]);
+        app.handle_drop(vec![TestDrop::handle("valid.ticket", ticket.clone())]);
         for _ in 0..100 {
             app.poll();
             if app.import_open {
@@ -2071,8 +2100,8 @@ mod tests {
         app.download_target = "/remote/d".into();
         app.path = "/share/unchanged".into();
         let ctx = egui::Context::default();
-        let _ = ctx.run(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = run_ui(&ctx, Default::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let id = ui.make_persistent_id("download_path");
                 ui.memory_mut(|m| m.request_focus(id));
                 app.path_input(ui, true);
@@ -2088,8 +2117,8 @@ mod tests {
             }],
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = run_ui(&ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 app.path_input(ui, true);
             });
         });
@@ -2179,22 +2208,20 @@ mod tests {
             )),
             ..Default::default()
         };
-        assert!(!ctx.run(input(), |ctx| app.ui(ctx)).shapes.is_empty());
+        assert!(!run_ui(&ctx, input(), |ui| app.show(ui)).shapes.is_empty());
         app.pairing = false;
         app.ready = true;
         for page in [Page::Data, Page::Settings] {
             app.page = page;
-            assert!(!ctx.run(input(), |ctx| app.ui(ctx)).shapes.is_empty());
+            assert!(!run_ui(&ctx, input(), |ui| app.show(ui)).shapes.is_empty());
         }
         let mut drop = input();
-        drop.dropped_files.push(egui::DroppedFile {
-            path: Some("/shared".into()),
-            ..Default::default()
-        });
-        let _ = ctx.run(drop.clone(), |ctx| app.ui(ctx));
+        drop.dropped_files
+            .push(TestDrop::handle("/shared", String::new()));
+        let _ = run_ui(&ctx, drop.clone(), |ui| app.show(ui));
         assert!(commands.try_recv().is_err());
         app.local_paths = true;
-        let _ = ctx.run(drop, |ctx| app.ui(ctx));
+        let _ = run_ui(&ctx, drop, |ui| app.show(ui));
         assert!(
             matches!(commands.try_recv().unwrap(), Action::ShareMany(paths) if paths == vec![PathBuf::from("/shared")])
         );
