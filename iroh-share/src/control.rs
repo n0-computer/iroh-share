@@ -180,13 +180,13 @@ pub fn pairing_address(endpoint: &iroh::Endpoint) -> iroh::EndpointAddr {
 #[derive(Debug)]
 pub struct Control {
     access: Access,
-    protocol: irpc_iroh::IrohProtocol<ControlProtocol>,
+    protocol: irpc::iroh::IrohProtocol<ControlProtocol>,
 }
 impl Control {
     pub fn new(access: Access, sender: irpc::LocalSender<ControlProtocol>) -> Self {
         Self {
             access,
-            protocol: irpc_iroh::IrohProtocol::with_sender(sender),
+            protocol: irpc::iroh::IrohProtocol::new(sender),
         }
     }
 }
@@ -403,7 +403,7 @@ mod tests {
                 }
             });
             let client =
-                irpc_iroh::client::<ControlProtocol>(peer.clone(), endpoint.addr(), CONTROL_ALPN);
+                irpc::Client::<ControlProtocol>::iroh(peer.clone(), endpoint.addr(), CONTROL_ALPN);
             assert!(client.rpc(List {}).await.is_err());
             let public = peer.connect(endpoint.addr(), iroh_blobs::ALPN).await?;
             assert!(public.close_reason().is_none());
@@ -412,7 +412,7 @@ mod tests {
                 .list()
                 .contains(&peer.id()));
             let client =
-                irpc_iroh::client::<ControlProtocol>(peer.clone(), endpoint.addr(), CONTROL_ALPN);
+                irpc::Client::<ControlProtocol>::iroh(peer.clone(), endpoint.addr(), CONTROL_ALPN);
             assert!(client.rpc(List {}).await?.is_ok());
             let mut events = client.server_streaming(Watch {}, 8).await?;
             assert!(matches!(

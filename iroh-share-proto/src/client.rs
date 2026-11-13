@@ -27,7 +27,11 @@ impl ControlClient {
     /// Use a caller-owned iroh endpoint, including an embedded UI's identity.
     pub fn from_endpoint(endpoint: Endpoint, addr: EndpointAddr) -> Self {
         Self {
-            client: irpc_iroh::client(endpoint.clone(), addr.clone(), crate::CONTROL_ALPN),
+            client: irpc::Client::<ControlProtocol>::iroh(
+                endpoint.clone(),
+                addr.clone(),
+                crate::CONTROL_ALPN,
+            ),
             endpoint,
             addr,
             remote: true,
@@ -265,7 +269,7 @@ impl ControlClient {
     pub async fn watch_announce(
         &self,
     ) -> Result<mpsc::Receiver<RpcResult<crate::AnnounceSnapshot>>> {
-        let client: Client<ControlProtocol> = irpc_iroh::client(
+        let client: Client<ControlProtocol> = Client::iroh(
             self.endpoint.clone(),
             self.addr.clone(),
             crate::CONTROL_ALPN,

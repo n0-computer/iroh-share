@@ -267,7 +267,7 @@ pub struct ImportNames {
 
 pub type RpcResult<T> = Result<T, String>;
 
-#[rpc_requests(message = ControlMessage, no_spans)]
+#[rpc_requests(message = ControlMessage)]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ControlProtocol {
     #[rpc(tx=oneshot::Sender<RpcResult<Vec<EndpointId>>>)]

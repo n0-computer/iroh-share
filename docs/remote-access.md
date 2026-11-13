@@ -60,7 +60,7 @@ have full control, including allowlist management. Grants are stored in
 `control-allowed.json` before being applied. Invalid allowlist files fail closed.
 
 An embedded iroh client can use the exported `CONTROL_ALPN` and `ControlProtocol`
-with `irpc_iroh::client`, using its own persistent key and the saved daemon ID.
+with `irpc::Client::iroh`, using its own persistent key and the saved daemon ID.
 The native client helper also exposes `ControlClient::from_endpoint` for a
 caller-owned endpoint. The allowlist boundary sits at the authenticated connection,
 independent of CLI/TUI or browser transport; no browser UI is included yet.
