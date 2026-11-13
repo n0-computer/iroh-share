@@ -186,7 +186,11 @@ impl Control {
     pub fn new(access: Access, sender: irpc::LocalSender<ControlProtocol>) -> Self {
         Self {
             access,
-            protocol: irpc::iroh::IrohProtocol::new(sender),
+            // A request this daemon does not know fails on its own, so a newer
+            // client can try it without losing the connection and its watches.
+            protocol: irpc::iroh::IrohProtocol::new(
+                irpc::rpc::Handler::from_sender(sender).skip_bad_requests(true),
+            ),
         }
     }
 }
@@ -427,6 +431,107 @@ mod tests {
                 .contains(&peer.id()));
             assert!(access.update(owner, false).is_err());
             assert!(public.close_reason().is_none());
+            peer.close().await;
+            router.shutdown().await?;
+            service.abort();
+            Ok::<_, anyhow::Error>(())
+        })
+        .await??;
+        Ok(())
+    }
+
+    /// A request type from a newer client: its variant index is past the end
+    /// of [`ControlProtocol`], so this daemon cannot decode it.
+    mod newer {
+        use irpc::{channel::oneshot, rpc_requests};
+        use serde::{Deserialize, Serialize, Serializer};
+
+        #[derive(Debug, Serialize, Deserialize)]
+        pub struct FutureRequest {}
+
+        #[rpc_requests(message = NewerMessage)]
+        #[derive(Debug, Deserialize)]
+        pub enum NewerProtocol {
+            #[rpc(tx=oneshot::Sender<()>)]
+            FutureRequest(FutureRequest),
+        }
+
+        impl Serialize for NewerProtocol {
+            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                let Self::FutureRequest(request) = self;
+                serializer.serialize_newtype_variant(
+                    "ControlProtocol",
+                    200,
+                    "FutureRequest",
+                    request,
+                )
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_request_fails_alone_and_keeps_the_connection() -> Result<()> {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            let root = tempfile::tempdir()?;
+            let endpoint = Endpoint::builder(presets::Minimal)
+                .bind_addr("127.0.0.1:0")?
+                .bind()
+                .await?;
+            let peer = Endpoint::builder(presets::Minimal)
+                .bind_addr("127.0.0.1:0")?
+                .bind()
+                .await?;
+            let access = Access::load(root.path(), peer.id())?;
+            let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+            let router = Router::builder(endpoint.clone())
+                .accept(
+                    CONTROL_ALPN,
+                    Control::new(access.clone(), irpc::LocalSender::from(tx)),
+                )
+                .spawn();
+            let service = tokio::spawn(async move {
+                let mut watchers = Vec::new();
+                while let Some(message) = rx.recv().await {
+                    match message {
+                        ControlMessage::List(message) => {
+                            let _ = message.tx.send(Ok(Vec::new())).await;
+                        }
+                        ControlMessage::Watch(message) => {
+                            let _ = message.tx.send(Ok(WatchEvent::SnapshotComplete)).await;
+                            watchers.push(message.tx);
+                        }
+                        _ => panic!("unexpected request"),
+                    }
+                }
+            });
+            // Both clients share one connection, as one client's requests do.
+            let connection = peer.connect(endpoint.addr(), CONTROL_ALPN).await?;
+            let control = irpc::Client::<ControlProtocol>::boxed(connection.clone());
+            let newer = irpc::Client::<newer::NewerProtocol>::boxed(connection.clone());
+            let mut events = control.server_streaming(Watch {}, 8).await?;
+            assert!(matches!(
+                events.recv().await?,
+                Some(Ok(WatchEvent::SnapshotComplete))
+            ));
+
+            let err = newer
+                .rpc(newer::FutureRequest {})
+                .await
+                .expect_err("the daemon does not know this request");
+            assert!(iroh_share_proto::is_unsupported_request(&err), "{err:#}");
+            assert!(iroh_share_proto::client::is_unsupported(
+                &anyhow::Error::from(err)
+            ));
+
+            assert!(control.rpc(List {}).await?.is_ok());
+            assert!(connection.close_reason().is_none());
+            assert!(
+                tokio::time::timeout(Duration::from_millis(100), events.recv())
+                    .await
+                    .is_err(),
+                "the watch stays open"
+            );
+
             peer.close().await;
             router.shutdown().await?;
             service.abort();
