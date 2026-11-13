@@ -48,6 +48,12 @@ impl ControlClient {
     pub fn endpoint_id(&self) -> iroh::EndpointId {
         self.endpoint.id()
     }
+    /// Closes the client's endpoint gracefully, for all clones of this client.
+    ///
+    /// For a client from [`Self::from_endpoint`], this closes the caller's endpoint too.
+    pub async fn close(&self) {
+        self.endpoint.close().await;
+    }
     /// Connect using only the client's own configuration and identity.
     /// Never falls back to daemon state files.
     pub async fn connect_configured(config_dir: &Path) -> Result<Self> {

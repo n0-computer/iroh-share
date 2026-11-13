@@ -946,93 +946,99 @@ async fn client(state_dir: &Path, command: CommandLine) -> Result<()> {
         return Ok(());
     }
     let client = iroh_share_proto::client::ControlClient::connect(state_dir).await?;
-    match command {
-        CommandLine::Control { command } => match command {
-            ControlCommand::Id | ControlCommand::Endpoint => unreachable!(),
-            ControlCommand::Stop => client.shutdown().await?,
-            ControlCommand::Pair => println!("{}", client.create_pairing_ticket().await?),
-            ControlCommand::Allow { endpoint } => client.allow_control(endpoint).await?,
-            ControlCommand::Revoke { endpoint } => client.revoke_control(endpoint).await?,
-            ControlCommand::List => {
-                for endpoint in client.list_control().await? {
-                    println!("{endpoint}");
+    let result = async {
+        match command {
+            CommandLine::Control { command } => match command {
+                ControlCommand::Id | ControlCommand::Endpoint => unreachable!(),
+                ControlCommand::Stop => client.shutdown().await?,
+                ControlCommand::Pair => println!("{}", client.create_pairing_ticket().await?),
+                ControlCommand::Allow { endpoint } => client.allow_control(endpoint).await?,
+                ControlCommand::Revoke { endpoint } => client.revoke_control(endpoint).await?,
+                ControlCommand::List => {
+                    for endpoint in client.list_control().await? {
+                        println!("{endpoint}");
+                    }
+                }
+            },
+            CommandLine::Refresh { id } => {
+                client.refresh(id).await?;
+                println!("Refresh requested");
+            }
+            CommandLine::Share {
+                path,
+                include_directory_name,
+            } => println!(
+                "{:#?}",
+                client
+                    .share_with_options(path, include_directory_name)
+                    .await?
+            ),
+            CommandLine::Download {
+                mut source,
+                target,
+                discover,
+            } => {
+                if discover {
+                    source.discovery = DiscoveryMode::Mainline;
+                }
+                println!("{:#?}", client.download(source, target).await?)
+            }
+            CommandLine::List => {
+                for job in client.list().await? {
+                    println!("{job:#?}");
                 }
             }
-        },
-        CommandLine::Refresh { id } => {
-            client.refresh(id).await?;
-            println!("Refresh requested");
-        }
-        CommandLine::Share {
-            path,
-            include_directory_name,
-        } => println!(
-            "{:#?}",
-            client
-                .share_with_options(path, include_directory_name)
-                .await?
-        ),
-        CommandLine::Download {
-            mut source,
-            target,
-            discover,
-        } => {
-            if discover {
-                source.discovery = DiscoveryMode::Mainline;
+            CommandLine::Watch => {
+                let mut updates = client.watch().await?;
+                while let Some(event) = updates.recv().await? {
+                    println!("{:#?}", event.map_err(anyhow::Error::msg)?);
+                }
             }
-            println!("{:#?}", client.download(source, target).await?)
-        }
-        CommandLine::List => {
-            for job in client.list().await? {
-                println!("{job:#?}");
-            }
-        }
-        CommandLine::Watch => {
-            let mut updates = client.watch().await?;
-            while let Some(event) = updates.recv().await? {
-                println!("{:#?}", event.map_err(anyhow::Error::msg)?);
-            }
-        }
-        CommandLine::Remove { id } => client.remove(id).await?,
-        CommandLine::Names { command } => match command {
-            NameCommand::Create { label, target } => {
-                let name = client.create_name(label, target.into_target()).await?;
-                println!("{}  {}\n{:#?}", name.label, name.key.url(), name);
-            }
-            NameCommand::Update { label, target } => {
-                let name = client.update_name(label, target.into_target()).await?;
-                println!("{}  {}\n{:#?}", name.label, name.key.url(), name);
-            }
-            NameCommand::Export { output } => {
-                client.export_names(&output).await?;
-                println!("Exported pkarr names to {}", output.display());
-            }
-            NameCommand::ExportName { label, output } => {
-                client.export_name(label, &output).await?;
-                println!("Exported pkarr name to {}", output.display());
-            }
-            NameCommand::Import { archive } => {
-                for imported in client.import_names(&archive).await? {
-                    match imported.outcome {
-                        iroh_share_proto::ImportOutcome::Imported { label } => {
-                            println!("{}  imported as {label}", imported.key)
-                        }
-                        iroh_share_proto::ImportOutcome::Skipped { reason } => {
-                            println!("{}  skipped: {reason}", imported.key)
+            CommandLine::Remove { id } => client.remove(id).await?,
+            CommandLine::Names { command } => match command {
+                NameCommand::Create { label, target } => {
+                    let name = client.create_name(label, target.into_target()).await?;
+                    println!("{}  {}\n{:#?}", name.label, name.key.url(), name);
+                }
+                NameCommand::Update { label, target } => {
+                    let name = client.update_name(label, target.into_target()).await?;
+                    println!("{}  {}\n{:#?}", name.label, name.key.url(), name);
+                }
+                NameCommand::Export { output } => {
+                    client.export_names(&output).await?;
+                    println!("Exported pkarr names to {}", output.display());
+                }
+                NameCommand::ExportName { label, output } => {
+                    client.export_name(label, &output).await?;
+                    println!("Exported pkarr name to {}", output.display());
+                }
+                NameCommand::Import { archive } => {
+                    for imported in client.import_names(&archive).await? {
+                        match imported.outcome {
+                            iroh_share_proto::ImportOutcome::Imported { label } => {
+                                println!("{}  imported as {label}", imported.key)
+                            }
+                            iroh_share_proto::ImportOutcome::Skipped { reason } => {
+                                println!("{}  skipped: {reason}", imported.key)
+                            }
                         }
                     }
                 }
-            }
-            NameCommand::List => {
-                for name in client.list_names().await? {
-                    println!("{}  {}\n{:#?}", name.label, name.key.url(), name);
+                NameCommand::List => {
+                    for name in client.list_names().await? {
+                        println!("{}  {}\n{:#?}", name.label, name.key.url(), name);
+                    }
                 }
-            }
-            NameCommand::Remove { label } => client.remove_name(label).await?,
-        },
-        CommandLine::Daemon { .. } => unreachable!(),
+                NameCommand::Remove { label } => client.remove_name(label).await?,
+            },
+            CommandLine::Daemon { .. } => unreachable!(),
+        }
+        Ok(())
     }
-    Ok(())
+    .await;
+    // Without this, dropping the endpoint logs an error on every command.
+    client.close().await;
+    result
 }
 
 #[tokio::main]
