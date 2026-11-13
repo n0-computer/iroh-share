@@ -209,6 +209,7 @@ async fn stop(state: &Path) -> Result<()> {
     })
     .await
     .with_context(|| format!("daemon did not stop: {result:?}"))??;
+    owner.close().await;
     Ok(())
 }
 
