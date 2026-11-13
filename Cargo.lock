@@ -2589,14 +2589,15 @@ dependencies = [
 
 [[package]]
 name = "iroh-mainline-endpoint-discovery"
-version = "0.1.3"
-source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=e9df2cccddc4370d8e39adb4efe275e8bb4913f6#e9df2cccddc4370d8e39adb4efe275e8bb4913f6"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8f5ff6e35d5d63db475b64ba38eff02263d06778dcced127e9f134db1e07e7c"
 dependencies = [
  "async-stream",
  "blake3",
  "data-encoding",
  "iroh-base",
- "lru 0.18.4",
+ "lru 0.19.0",
  "n0-error",
  "n0-future",
  "n0-mainline",
@@ -2607,7 +2608,7 @@ dependencies = [
  "simple-dns",
  "tokio",
  "tracing",
- "udp-addr-index-proto 0.1.3",
+ "udp-addr-index-proto",
  "z32",
 ]
 
@@ -3113,6 +3114,15 @@ name = "lru"
 version = "0.18.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff9840bcc50b71349309900da0ce7279aa336ae71d73250b07998932c7d97c25"
+dependencies = [
+ "hashbrown 0.17.1",
+]
+
+[[package]]
+name = "lru"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a9f71e3591c7ec44d3e563e87bf14ddc2bada8519dca046e5b0e560cd004e2d"
 dependencies = [
  "hashbrown 0.17.1",
 ]
@@ -5962,8 +5972,9 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "udp-addr-index"
-version = "0.1.0"
-source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=62b399fa39c710b6f3981273dc4a4153c6ac4811#62b399fa39c710b6f3981273dc4a4153c6ac4811"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6ae2c9f191b177ee6b41342a94d46b4a1bcf80f0bfd845242bdae6b4a7b7888"
 dependencies = [
  "blake3",
  "iroh-metrics",
@@ -5973,22 +5984,14 @@ dependencies = [
  "rand 0.10.3",
  "tokio",
  "tracing",
- "udp-addr-index-proto 0.1.0",
+ "udp-addr-index-proto",
 ]
 
 [[package]]
 name = "udp-addr-index-proto"
-version = "0.1.0"
-source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=62b399fa39c710b6f3981273dc4a4153c6ac4811#62b399fa39c710b6f3981273dc4a4153c6ac4811"
-dependencies = [
- "postcard",
- "serde",
-]
-
-[[package]]
-name = "udp-addr-index-proto"
-version = "0.1.3"
-source = "git+https://github.com/n0-computer/iroh-content-discovery.git?rev=e9df2cccddc4370d8e39adb4efe275e8bb4913f6#e9df2cccddc4370d8e39adb4efe275e8bb4913f6"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc03d6dc71c9b47dcae6eba9304b85316bbee8d79e67741a98f7b5bccfea0d47"
 dependencies = [
  "postcard",
  "serde",
