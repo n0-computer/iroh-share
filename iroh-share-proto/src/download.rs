@@ -1,11 +1,13 @@
 use std::{fmt, str::FromStr};
 
 use iroh_blobs::{BlobFormat, HashAndFormat};
+use n0_schema::schema;
 use serde::{Deserialize, Serialize};
 
 use crate::{BlobTicket, Hash, Url};
 
 /// Whether the daemon may find providers beyond the supplied addresses.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DiscoveryMode {
     /// Only contact the supplied providers.
@@ -18,8 +20,10 @@ pub enum DiscoveryMode {
 ///
 /// Parses blake3.net root URLs, z32/hex hashes, and collection blob tickets.
 /// URLs and hashes enable discovery; tickets restrict downloads to their provider.
+#[schema(Nominal)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DownloadSource {
+    #[schema(atom = "Hash")]
     pub hash: Hash,
     /// Empty when no provider addresses are supplied.
     pub providers: Vec<iroh::EndpointAddr>,

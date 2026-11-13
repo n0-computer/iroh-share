@@ -1,4 +1,5 @@
 mod control;
+mod control_v5;
 mod dns_records;
 mod names;
 mod paths;
@@ -202,7 +203,7 @@ impl Actor {
                     if let Some(job) = update {
                         if let std::collections::btree_map::Entry::Occupied(mut entry) = self.jobs.entry(job.id) {
                             entry.insert(job.clone());
-                            self.refresh_announcements();
+                            self.update_announcements().await;
                             self.refresh_names().await;
                             self.broadcast(WatchEvent::JobUpdated(Box::new(job))).await;
                         }
@@ -214,12 +215,6 @@ impl Actor {
                 ControlMessage::Shutdown(message) => {
                     let _ = message.tx.send(Ok(())).await;
                     break;
-                }
-                ControlMessage::GetGateway(message) => {
-                    let _ = message.tx.send(Ok(removed_gateway())).await;
-                }
-                ControlMessage::SetGateway(message) => {
-                    let _ = message.tx.send(Err(GATEWAY_REMOVED.to_owned())).await;
                 }
                 ControlMessage::CreatePairingTicket(message) => {
                     let ticket = self.pairing.issue(control::pairing_address(&self.endpoint));
@@ -334,20 +329,13 @@ impl Actor {
                     let _ = message.tx.send(Ok(self.imports_dir.clone())).await;
                 }
                 ControlMessage::Import(message) => {
-                    let result = self
-                        .import_ticket(message.inner.source, message.inner.id, None, None)
-                        .await;
-                    self.imported(&result).await;
-                    let _ = message.tx.send(result).await;
-                }
-                ControlMessage::ImportWithOptions(message) => {
                     let WithChannels { inner, tx, .. } = message;
                     let result = self
                         .import_ticket(
                             inner.source,
                             inner.id,
-                            Some(inner.include_directory_name),
-                            Some(inner.announce),
+                            inner.include_directory_name,
+                            inner.announce,
                         )
                         .await;
                     self.imported(&result).await;
@@ -362,23 +350,8 @@ impl Actor {
                     } else {
                         Err("This data is no longer available".into())
                     };
-                    self.refresh_announcements();
+                    self.update_announcements().await;
                     let _ = tx.send(result).await;
-                }
-                ControlMessage::WatchAnnounce(message) => {
-                    let mut settings = self.announce_settings.subscribe();
-                    tokio::spawn(async move {
-                        loop {
-                            let snapshot = settings.borrow_and_update().clone();
-                            if message.tx.send(Ok(snapshot)).await.is_err() {
-                                break;
-                            }
-                            tokio::select! {
-                                changed = settings.changed() => if changed.is_err() { break },
-                                _ = message.tx.closed() => break,
-                            }
-                        }
-                    });
                 }
                 ControlMessage::Refresh(message) => {
                     let result = self.request_refresh(message.inner.id);
@@ -387,28 +360,36 @@ impl Actor {
                 ControlMessage::Share(message) => {
                     let WithChannels { inner, tx, .. } = message;
                     let result = {
-                        self.start(JobKind::Share {
-                            path: inner.path,
-                            include_directory_name: inner.include_directory_name,
-                        })
+                        self.start(
+                            JobKind::Share {
+                                path: inner.path,
+                                include_directory_name: inner.include_directory_name,
+                            },
+                            inner.announce,
+                        )
                     };
                     if let Ok(job) = &result {
                         self.broadcast(WatchEvent::JobUpdated(Box::new(job.clone())))
                             .await;
+                        self.update_announcements().await;
                     }
                     let _ = tx.send(result).await;
                 }
                 ControlMessage::Download(message) => {
                     let WithChannels { inner, tx, .. } = message;
                     let result = {
-                        self.start(JobKind::Download {
-                            source: inner.source,
-                            target: inner.target,
-                        })
+                        self.start(
+                            JobKind::Download {
+                                source: inner.source,
+                                target: inner.target,
+                            },
+                            inner.announce,
+                        )
                     };
                     if let Ok(job) = &result {
                         self.broadcast(WatchEvent::JobUpdated(Box::new(job.clone())))
                             .await;
+                        self.update_announcements().await;
                     }
                     let _ = tx.send(result).await;
                 }
@@ -446,7 +427,7 @@ impl Actor {
                         {
                             tracing::warn!(%error, "Cannot remove previous content tag");
                         }
-                        self.refresh_announcements();
+                        self.update_announcements().await;
                         self.refresh_names().await;
                         self.broadcast(WatchEvent::JobRemoved { id: inner.id })
                             .await;
@@ -474,8 +455,8 @@ impl Actor {
                         }
                     }
                     if alive {
-                        alive =
-                            send_update(&tx, WatchEvent::GatewayUpdated(removed_gateway())).await;
+                        let snapshot = self.announce_settings.borrow().clone();
+                        alive = send_update(&tx, WatchEvent::AnnounceUpdated(snapshot)).await;
                     }
                     if alive && send_update(&tx, WatchEvent::SnapshotComplete).await {
                         self.watchers.push(tx);
@@ -503,7 +484,8 @@ impl Actor {
         }
     }
 
-    fn refresh_announcements(&self) {
+    /// Updates the announced hashes and settings; true if the settings changed.
+    fn refresh_announcements(&self) -> bool {
         let snapshot = self.names.announce_snapshot();
         self.announcements.send_replace(
             self.jobs
@@ -519,7 +501,15 @@ impl Actor {
             let changed = *current != snapshot;
             *current = snapshot;
             changed
-        });
+        })
+    }
+
+    /// Refreshes announcements, and tells watchers when the settings changed.
+    async fn update_announcements(&mut self) {
+        if self.refresh_announcements() {
+            let snapshot = self.announce_settings.borrow().clone();
+            self.broadcast(WatchEvent::AnnounceUpdated(snapshot)).await;
+        }
     }
 
     async fn broadcast(&mut self, event: WatchEvent) {
@@ -534,7 +524,7 @@ impl Actor {
 
     async fn imported(&mut self, result: &RpcResult<Job>) {
         if let Ok(job) = result {
-            self.refresh_announcements();
+            self.update_announcements().await;
             self.refresh_names().await;
             self.broadcast(WatchEvent::JobUpdated(Box::new(job.clone())))
                 .await;
@@ -651,8 +641,8 @@ impl Actor {
             .map_err(|_| "A refresh is already pending or the share worker stopped".into())
     }
 
-    fn start(&mut self, kind: JobKind) -> RpcResult<Job> {
-        self.start_saved(recovery::SavedData::new(&kind), true)
+    fn start(&mut self, kind: JobKind, announce: bool) -> RpcResult<Job> {
+        self.start_saved(recovery::SavedData::new(&kind), announce)
     }
 
     fn start_saved(&mut self, saved: recovery::SavedData, announce: bool) -> RpcResult<Job> {
@@ -715,21 +705,6 @@ impl Actor {
         );
         self.jobs.insert(id, job.clone());
         job
-    }
-}
-
-const GATEWAY_REMOVED: &str =
-    "This daemon no longer includes a gateway. Install Iroh Link Gateway to browse blake3.net and pkarr.net links.";
-
-/// What the daemon reports to clients from 0.1.7 and earlier, which still
-/// show gateway settings.
-fn removed_gateway() -> iroh_share_proto::GatewaySnapshot {
-    iroh_share_proto::GatewaySnapshot {
-        config: iroh_share_proto::GatewayConfig {
-            enabled: false,
-            ..Default::default()
-        },
-        state: iroh_share_proto::GatewayState::Disabled,
     }
 }
 
@@ -797,8 +772,18 @@ async fn daemon(
             BlobsProtocol::new(&store, Some(upload_events)),
         )
         .accept(
+            iroh_share_proto::v5::CONTROL_ALPN,
+            control::Control::new(
+                access.clone(),
+                control_v5::serve(irpc::Client::from(tx.clone())),
+            ),
+        )
+        .accept(
             iroh_share_proto::CONTROL_ALPN,
-            control::Control::new(access.clone(), irpc::LocalSender::from(tx)),
+            control::Control::<iroh_share_proto::ControlProtocol>::new(
+                access.clone(),
+                irpc::LocalSender::from(tx),
+            ),
         )
         .spawn();
     let mut local_addr = iroh::EndpointAddr::from(blob_endpoint.id());
@@ -970,7 +955,7 @@ async fn client(state_dir: &Path, command: CommandLine) -> Result<()> {
             } => println!(
                 "{:#?}",
                 client
-                    .share_with_options(path, include_directory_name)
+                    .share_with_options(path, include_directory_name, true)
                     .await?
             ),
             CommandLine::Download {
@@ -1076,6 +1061,45 @@ mod tests {
         Ok(())
     }
 
+    /// A later client, whose `Share` gained a field this daemon does not know.
+    mod future {
+        use iroh_share_proto::{Job, List, RpcResult};
+        use irpc::{channel::oneshot, rpc_requests};
+        use n0_schema::{schema, serialize_service};
+        use serde::{Deserialize, Serialize};
+
+        #[schema(Nominal)]
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub struct Share {
+            pub path: std::path::PathBuf,
+            pub include_directory_name: bool,
+            pub announce: bool,
+            pub label: Option<String>,
+        }
+
+        #[rpc_requests(message = FutureMessage)]
+        #[serialize_service(FutureProtocol)]
+        #[derive(Debug)]
+        pub enum FutureProtocol {
+            #[rpc(tx=oneshot::Sender<RpcResult<Job>>)]
+            Share(Share),
+            #[rpc(tx=oneshot::Sender<RpcResult<Vec<Job>>>)]
+            List(List),
+        }
+    }
+
+    /// The next announcement settings from a watch stream, skipping other events.
+    async fn next_announce(
+        events: &mut irpc::channel::mpsc::Receiver<RpcResult<WatchEvent>>,
+    ) -> Result<iroh_share_proto::AnnounceSnapshot> {
+        loop {
+            let event = events.recv().await?.context("watch closed")?;
+            if let WatchEvent::AnnounceUpdated(snapshot) = event.map_err(anyhow::Error::msg)? {
+                return Ok(snapshot);
+            }
+        }
+    }
+
     async fn control_lifecycle() -> Result<()> {
         let temp = tempfile::tempdir()?;
         let source = temp.path().join("hello.txt");
@@ -1103,10 +1127,25 @@ mod tests {
                 BlobsProtocol::new(&store, Some(upload_events)),
             )
             .accept(
+                iroh_share_proto::v5::CONTROL_ALPN,
+                control::Control::new(
+                    access.clone(),
+                    control_v5::serve(irpc::Client::from(tx.clone())),
+                ),
+            )
+            .accept(
                 iroh_share_proto::CONTROL_ALPN,
-                control::Control::new(access.clone(), irpc::LocalSender::from(tx)),
+                control::Control::<iroh_share_proto::ControlProtocol>::new(
+                    access.clone(),
+                    irpc::LocalSender::from(tx),
+                ),
             )
             .spawn();
+        let v5 = irpc::Client::<iroh_share_proto::v5::ControlProtocol>::iroh(
+            control_client.clone(),
+            endpoint.addr(),
+            iroh_share_proto::v5::CONTROL_ALPN,
+        );
         let (updates_tx, updates_rx) = mpsc::channel(128);
         let (announcements, hashes) = watch::channel(Default::default());
         let (names, _) = names::Names::load(temp.path(), false)?;
@@ -1136,14 +1175,13 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let task = tokio::spawn(actor.run(shutdown_rx));
         let mut updates = client.server_streaming(Watch {}, 64).await?;
-        // Clients from 0.1.7 and earlier still expect gateway state.
         assert!(matches!(
             updates
                 .recv()
                 .await?
                 .context("watch closed")?
                 .map_err(anyhow::Error::msg)?,
-            WatchEvent::GatewayUpdated(snapshot) if snapshot == removed_gateway()
+            WatchEvent::AnnounceUpdated(snapshot) if snapshot.disabled.is_empty()
         ));
         assert!(matches!(
             updates
@@ -1153,20 +1191,60 @@ mod tests {
                 .map_err(anyhow::Error::msg)?,
             WatchEvent::SnapshotComplete
         ));
-        let gateway = client
-            .rpc(iroh_share_proto::GetGateway {})
+        // A request this daemon does not know fails alone; the connection stays.
+        let later = irpc::Client::<future::FutureProtocol>::iroh(
+            control_client.clone(),
+            endpoint.addr(),
+            iroh_share_proto::CONTROL_ALPN,
+        );
+        let err = later
+            .rpc(future::Share {
+                path: source.clone(),
+                include_directory_name: false,
+                announce: true,
+                label: Some("later".into()),
+            })
+            .await
+            .expect_err("changed request must be rejected");
+        assert!(iroh_share_proto::is_unsupported_request(&err), "{err:?}");
+        assert!(later
+            .rpc(List {})
+            .await?
+            .map_err(anyhow::Error::msg)?
+            .is_empty());
+        // Clients up to 0.1.13 use the old protocol, through the translation.
+        let mut old_updates = v5.server_streaming(iroh_share_proto::Watch {}, 64).await?;
+        assert!(matches!(
+            old_updates.recv().await?.context("watch closed")?.map_err(anyhow::Error::msg)?,
+            iroh_share_proto::v5::WatchEvent::GatewayUpdated(snapshot) if snapshot == control_v5::removed_gateway()
+        ));
+        assert!(matches!(
+            old_updates
+                .recv()
+                .await?
+                .context("watch closed")?
+                .map_err(anyhow::Error::msg)?,
+            iroh_share_proto::v5::WatchEvent::SnapshotComplete
+        ));
+        drop(old_updates);
+        let gateway = v5
+            .rpc(iroh_share_proto::v5::GetGateway {})
             .await?
             .map_err(anyhow::Error::msg)?;
-        assert_eq!(gateway, removed_gateway());
+        assert_eq!(gateway, control_v5::removed_gateway());
         assert_eq!(
-            client
-                .rpc(iroh_share_proto::SetGateway {
-                    config: Default::default(),
-                })
-                .await?
-                .unwrap_err(),
-            GATEWAY_REMOVED
+            v5.rpc(iroh_share_proto::v5::SetGateway {
+                config: Default::default(),
+            })
+            .await?
+            .unwrap_err(),
+            control_v5::GATEWAY_REMOVED
         );
+        assert!(v5
+            .rpc(List {})
+            .await?
+            .map_err(anyhow::Error::msg)?
+            .is_empty());
         let invitation = client
             .rpc(iroh_share_proto::CreatePairingTicket {})
             .await?
@@ -1195,6 +1273,7 @@ mod tests {
             .rpc(Share {
                 path: source.clone(),
                 include_directory_name: false,
+                announce: true,
             })
             .await?
             .map_err(anyhow::Error::msg)?;
@@ -1224,6 +1303,7 @@ mod tests {
                     .rpc(Download {
                         source,
                         target: temp.path().join("download"),
+                        announce: true,
                     })
                     .await?;
                 assert_eq!(
@@ -1256,7 +1336,7 @@ mod tests {
                 .await?
                 .context("watch closed")?
                 .map_err(anyhow::Error::msg)?,
-            WatchEvent::GatewayUpdated(_)
+            WatchEvent::AnnounceUpdated(_)
         ));
         assert!(matches!(
             snapshot
@@ -1290,6 +1370,7 @@ mod tests {
             .rpc(Share {
                 path: directory,
                 include_directory_name: false,
+                announce: true,
             })
             .await?
             .map_err(anyhow::Error::msg)?;
@@ -1351,11 +1432,9 @@ mod tests {
                 _ => None,
             })
             .context("missing seeded directory")?;
-        let mut announce = client
-            .server_streaming(iroh_share_proto::WatchAnnounce {}, 8)
-            .await?;
-        let initial = announce.recv().await?.context("no announce snapshot")?;
-        assert!(initial.map_err(anyhow::Error::msg)?.disabled.is_empty());
+        let mut announce = client.server_streaming(Watch {}, 64).await?;
+        let initial = next_announce(&mut announce).await?;
+        assert!(initial.disabled.is_empty());
         assert!(hashes.borrow().contains(&ticket.hash()));
         client
             .rpc(iroh_share_proto::SetAnnounce {
@@ -1364,11 +1443,8 @@ mod tests {
             })
             .await?
             .map_err(anyhow::Error::msg)?;
-        let off = announce.recv().await?.context("no announce update")?;
-        assert!(off
-            .map_err(anyhow::Error::msg)?
-            .disabled
-            .contains(&shared.id));
+        let off = next_announce(&mut announce).await?;
+        assert!(off.disabled.contains(&shared.id));
         assert!(!hashes.borrow().contains(&ticket.hash()));
         client
             .rpc(iroh_share_proto::SetAnnounce {
@@ -1377,34 +1453,33 @@ mod tests {
             })
             .await?
             .map_err(anyhow::Error::msg)?;
-        let on = announce.recv().await?.context("no announce update")?;
-        assert!(on.map_err(anyhow::Error::msg)?.disabled.is_empty());
+        let on = next_announce(&mut announce).await?;
+        assert!(on.disabled.is_empty());
         assert!(hashes.borrow().contains(&ticket.hash()));
         // New data can start unannounced, set in the same step that creates it.
         let quiet = client
-            .rpc(iroh_share_proto::ImportWithOptions {
+            .rpc(iroh_share_proto::Import {
                 source: ticket.clone().try_into()?,
                 id: None,
-                include_directory_name: true,
-                announce: false,
+                include_directory_name: Some(true),
+                announce: Some(false),
             })
             .await?
             .map_err(anyhow::Error::msg)?;
-        let off = announce.recv().await?.context("no announce update")?;
-        assert!(off
-            .map_err(anyhow::Error::msg)?
-            .disabled
-            .contains(&quiet.id));
+        let off = next_announce(&mut announce).await?;
+        assert!(off.disabled.contains(&quiet.id));
         client
             .rpc(Remove { id: quiet.id })
             .await?
             .map_err(anyhow::Error::msg)?;
-        let gone = announce.recv().await?.context("no announce update")?;
-        assert!(gone.map_err(anyhow::Error::msg)?.disabled.is_empty());
+        let gone = next_announce(&mut announce).await?;
+        assert!(gone.disabled.is_empty());
         let imported = client
             .rpc(iroh_share_proto::Import {
                 source: ticket.clone().try_into()?,
                 id: None,
+                include_directory_name: None,
+                announce: None,
             })
             .await?
             .map_err(anyhow::Error::msg)?;
@@ -1453,6 +1528,8 @@ mod tests {
             .rpc(iroh_share_proto::Import {
                 source: replacement_ticket.clone().try_into()?,
                 id: Some(imported.id),
+                include_directory_name: None,
+                announce: None,
             })
             .await?
             .map_err(anyhow::Error::msg)?;

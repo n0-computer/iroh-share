@@ -8,13 +8,16 @@ use irpc::{
     channel::{mpsc, oneshot},
     rpc_requests,
 };
+use n0_schema::{schema, serialize_service};
 use serde::{Deserialize, Serialize};
 
 pub use iroh::EndpointId;
 pub use iroh_blobs::{ticket::BlobTicket, Hash};
 pub use url::Url;
 /// Control shares the blob endpoint; only allowlisted endpoint IDs may use it.
-pub const CONTROL_ALPN: &[u8] = b"/iroh-share/control/5";
+pub const CONTROL_ALPN: &[u8] = b"/iroh-share/control/6";
+
+pub mod v5;
 
 /// Returns true if the daemon rejected a request because it does not know it.
 ///
@@ -24,22 +27,22 @@ pub const CONTROL_ALPN: &[u8] = b"/iroh-share/control/5";
 pub fn is_unsupported_request(err: &irpc::Error) -> bool {
     err.remote_code() == Some(irpc::rpc::ErrorCode::RequestDecodeFailed)
 }
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AllowControl {
     pub endpoint: EndpointId,
 }
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RevokeControl {
     pub endpoint: EndpointId,
 }
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListControl {}
 
 mod download;
 pub use download::*;
-
-mod gateway;
-pub use gateway::*;
 
 mod pairing;
 pub use pairing::*;
@@ -47,36 +50,30 @@ pub use pairing::*;
 mod names;
 pub use names::*;
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Share {
     pub path: PathBuf,
     /// Put directory contents under its basename rather than at the collection root.
     pub include_directory_name: bool,
+    /// False keeps the data off Mainline from the start; see [`SetAnnounce`].
+    pub announce: bool,
 }
 
 /// Fetch into the daemon's public import directory and seed; retain names when updating.
-///
-/// New data keeps the collection's paths. Updates reuse the layout chosen when
-/// the data was imported; see [`ImportWithOptions`].
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Import {
     pub source: DownloadSource,
     /// Update existing data while retaining its ID and linked names; None creates data.
     pub id: Option<u64>,
-}
-
-/// [`Import`] with an explicit layout, remembered for later updates of the data.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImportWithOptions {
-    pub source: DownloadSource,
-    /// Update existing data while retaining its ID and linked names; None creates data.
-    pub id: Option<u64>,
     /// False drops the collection's single top-level directory, which yields a
-    /// new collection hash. Fails if the collection has no such directory.
-    pub include_directory_name: bool,
-    /// False keeps the data off Mainline, as [`SetAnnounce`] does. New data is
-    /// created with this setting, so it is never announced, not even briefly.
-    pub announce: bool,
+    /// new collection hash. None keeps the collection's paths for new data, and
+    /// the remembered layout for updates.
+    pub include_directory_name: Option<bool>,
+    /// False keeps the data off Mainline from the start. None announces new
+    /// data and keeps the setting of updated data.
+    pub announce: Option<bool>,
 }
 
 /// Turn Mainline announcement of one data item's content hash on or off.
@@ -84,18 +81,15 @@ pub struct ImportWithOptions {
 /// Off keeps seeding: direct tickets still work, but blake3.net links and
 /// provider discovery can no longer find this daemon for that content.
 /// The choice persists across updates and restarts.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetAnnounce {
     pub id: u64,
     pub announce: bool,
 }
 
-/// Stream [`AnnounceSnapshot`]s: one immediately, then one per change.
-///
-/// Separate from [`Watch`] so `Job` and `WatchEvent` stay compatible with older clients.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WatchAnnounce {}
-
+/// Per-data Mainline announcement settings, sent in [`WatchEvent::AnnounceUpdated`].
+#[schema(Nominal)]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnnounceSnapshot {
     /// False when the daemon runs with `--no-announce`; nothing is announced.
@@ -105,47 +99,59 @@ pub struct AnnounceSnapshot {
 }
 
 /// Report the default public destination on the daemon's filesystem.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetImportDirectory {}
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Refresh {
     pub id: u64,
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Download {
     pub source: DownloadSource,
     pub target: PathBuf,
+    /// False keeps the data off Mainline from the start; see [`SetAnnounce`].
+    pub announce: bool,
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Remove {
     pub id: u64,
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct List {}
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Watch {}
 
 /// Gracefully stop the daemon; restricted to authorized control clients.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Shutdown {}
 
 /// Complete a path using the daemon's filesystem, home and working directory.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletePath {
     pub path: PathBuf,
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PathKind {
     File,
     Directory,
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PathCandidate {
     /// Absolute daemon path; directories include the daemon's trailing separator.
@@ -153,6 +159,7 @@ pub struct PathCandidate {
     pub kind: PathKind,
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathCompletions {
     /// Safe common prefix, computed with the daemon's path syntax.
@@ -163,6 +170,7 @@ pub struct PathCompletions {
 }
 
 /// Counters for importing a known set of source files.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ImportProgress {
     pub bytes_done: u64,
@@ -172,6 +180,7 @@ pub struct ImportProgress {
 }
 
 /// Download counters include collection metadata. The total may not yet be known.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DownloadProgress {
     pub bytes_done: u64,
@@ -179,6 +188,7 @@ pub struct DownloadProgress {
 }
 
 /// Export counters cover payload files only.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExportProgress {
     pub bytes_done: u64,
@@ -187,6 +197,7 @@ pub struct ExportProgress {
     pub files_total: u64,
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Job {
     pub id: u64,
@@ -194,6 +205,7 @@ pub struct Job {
     pub state: JobState,
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum JobKind {
     Share {
@@ -206,12 +218,14 @@ pub enum JobKind {
     },
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobError {
     pub message: String,
 }
 
 /// Each state carries exactly the information available in that state.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum JobState {
     Queued,
@@ -223,11 +237,13 @@ pub enum JobState {
         progress: DownloadProgress,
     },
     Exporting {
+        #[schema(atom = "Hash")]
         root_hash: Hash,
         progress: ExportProgress,
     },
     /// The root hash is available through `ticket.hash()`.
     Seeding {
+        #[schema(atom = "BlobTicket")]
         ticket: BlobTicket,
         /// Active requests addressed to this collection root (not distinct peers).
         active_uploads: u32,
@@ -237,6 +253,7 @@ pub enum JobState {
     },
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WatchEvent {
     /// A complete job snapshot, both during initial enumeration and live updates.
@@ -250,16 +267,18 @@ pub enum WatchEvent {
     JobRemoved {
         id: u64,
     },
-    /// Sent once per watcher for older clients; see [`GetGateway`].
-    GatewayUpdated(GatewaySnapshot),
+    /// Announcement settings: sent before [`Self::SnapshotComplete`], then on every change.
+    AnnounceUpdated(AnnounceSnapshot),
 }
 
 /// Export all naming keys and current records as a ZIP archive.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportNames {}
 
 /// Export one name's key and current record as a ZIP archive, in the same
 /// layout as [`ExportNames`].
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportName {
     pub label: String,
@@ -269,6 +288,7 @@ pub struct ExportName {
 ///
 /// The whole archive is validated before any name is added. Keys the daemon
 /// already manages are skipped, never overwritten.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportNames {
     pub archive: Vec<u8>,
@@ -277,7 +297,8 @@ pub struct ImportNames {
 pub type RpcResult<T> = Result<T, String>;
 
 #[rpc_requests(message = ControlMessage)]
-#[derive(Debug, Serialize, Deserialize)]
+#[serialize_service(ControlProtocol)]
+#[derive(Debug)]
 pub enum ControlProtocol {
     #[rpc(tx=oneshot::Sender<RpcResult<Vec<EndpointId>>>)]
     ListControl(ListControl),
@@ -307,11 +328,6 @@ pub enum ControlProtocol {
     CompletePath(CompletePath),
     #[rpc(tx=oneshot::Sender<RpcResult<PairingTicket>>)]
     CreatePairingTicket(CreatePairingTicket),
-    /// Kept for wire compatibility; the daemon no longer runs a gateway.
-    #[rpc(tx=oneshot::Sender<RpcResult<GatewaySnapshot>>)]
-    GetGateway(GetGateway),
-    #[rpc(tx=oneshot::Sender<RpcResult<GatewaySnapshot>>)]
-    SetGateway(SetGateway),
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     Shutdown(Shutdown),
     /// Rescan a local directory followed by at least one managed name.
@@ -327,10 +343,6 @@ pub enum ControlProtocol {
     ExportName(ExportName),
     #[rpc(tx=oneshot::Sender<RpcResult<Vec<ImportedName>>>)]
     ImportNames(ImportNames),
-    #[rpc(tx=oneshot::Sender<RpcResult<Job>>)]
-    ImportWithOptions(ImportWithOptions),
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     SetAnnounce(SetAnnounce),
-    #[rpc(tx=mpsc::Sender<RpcResult<AnnounceSnapshot>>)]
-    WatchAnnounce(WatchAnnounce),
 }

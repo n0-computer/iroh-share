@@ -114,7 +114,7 @@ async fn session(
                 // after reconnecting. Only enable input after this drain.
                 while actions.try_recv().is_ok() {}
             }
-            tx.send(Update::Event(event)).await?;
+            tx.send(update(event)).await?;
             if done {
                 return Ok::<_, anyhow::Error>(());
             }
@@ -123,25 +123,13 @@ async fn session(
     tokio::time::timeout(Duration::from_secs(15), snapshot)
         .await
         .context("initial snapshot timed out")??;
-    // Older daemons drop the probe's own connection; the session carries on without it.
-    let mut announce = client.watch_announce().await.ok();
     let mut completions = tokio::task::JoinSet::new();
     loop {
         tokio::select! {
             _ = tx.closed() => return Ok(()),
-            snapshot = async { announce.as_mut().expect("guarded").recv().await }, if announce.is_some() => {
-                let snapshot = match snapshot {
-                    Ok(Some(Ok(snapshot))) => Some(snapshot),
-                    _ => {
-                        announce = None;
-                        None
-                    }
-                };
-                tx.send(Update::Announce(snapshot)).await?;
-            }
             event = events.recv() => {
                 let event = event?.context("daemon disconnected")?.map_err(anyhow::Error::msg)?;
-                tx.send(Update::Event(event)).await?;
+                tx.send(update(event)).await?;
             }
             Some(result) = completions.join_next() => {
                 if let Ok(update) = result { tx.send(update).await?; }
@@ -160,7 +148,7 @@ async fn session(
                     Action::CreateName { label, target } => client.create_name(label, target).await.map(|name| format!("Created {}: {}", name.label, name.key.url())),
                     Action::UpdateName { label, target } => client.update_name(label, target).await.map(|name| format!("Updated {}", name.label)),
                     Action::RemoveName(label) => client.remove_name(label.clone()).await.map(|()| format!("Removed name {label}")),
-                    Action::ShareWithDirectoryName(path) => match client.share_with_options(path, true).await {
+                    Action::ShareWithDirectoryName(path) => match client.share_with_options(path, true, true).await {
                         Ok(job) => { tx.send(Update::Added { job, new: true }).await?; continue; }
                         Err(error) => Err(error),
                     },
@@ -190,5 +178,13 @@ async fn session(
                 tx.send(Update::ActionResult(result.map_err(|error| format!("{error:#}")))).await?;
             }
         }
+    }
+}
+
+/// Announcement settings go to their own update; everything else is a model event.
+fn update(event: WatchEvent) -> Update {
+    match event {
+        WatchEvent::AnnounceUpdated(snapshot) => Update::Announce(Some(snapshot)),
+        event => Update::Event(event),
     }
 }

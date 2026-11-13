@@ -27,7 +27,6 @@ pub fn default_state_dir() -> Result<PathBuf> {
 pub struct ControlClient {
     client: Client<ControlProtocol>,
     endpoint: Endpoint,
-    addr: EndpointAddr,
     remote: bool,
 }
 
@@ -37,11 +36,10 @@ impl ControlClient {
         Self {
             client: irpc::Client::<ControlProtocol>::iroh(
                 endpoint.clone(),
-                addr.clone(),
+                addr,
                 crate::CONTROL_ALPN,
             ),
             endpoint,
-            addr,
             remote: true,
         }
     }
@@ -150,13 +148,15 @@ impl ControlClient {
     }
 
     pub async fn share(&self, path: PathBuf) -> Result<Job> {
-        self.share_with_options(path, false).await
+        self.share_with_options(path, false, true).await
     }
 
+    /// Shares `path`; with `announce` false, the data is kept off Mainline from the start.
     pub async fn share_with_options(
         &self,
         path: PathBuf,
         include_directory_name: bool,
+        announce: bool,
     ) -> Result<Job> {
         let path = if self.remote {
             path
@@ -168,6 +168,7 @@ impl ControlClient {
             self.client.rpc(Share {
                 path,
                 include_directory_name,
+                announce,
             }),
         )
         .await
@@ -178,7 +179,12 @@ impl ControlClient {
     pub async fn import(&self, source: crate::DownloadSource, id: Option<u64>) -> Result<Job> {
         tokio::time::timeout(
             Duration::from_secs(10),
-            self.client.rpc(crate::Import { source, id }),
+            self.client.rpc(crate::Import {
+                source,
+                id,
+                include_directory_name: None,
+                announce: None,
+            }),
         )
         .await
         .context("import request timed out; check data before retrying")??
@@ -197,11 +203,11 @@ impl ControlClient {
     ) -> Result<Job> {
         tokio::time::timeout(
             Duration::from_secs(10),
-            self.client.rpc(crate::ImportWithOptions {
+            self.client.rpc(crate::Import {
                 source,
                 id,
-                include_directory_name,
-                announce,
+                include_directory_name: Some(include_directory_name),
+                announce: Some(announce),
             }),
         )
         .await
@@ -244,6 +250,7 @@ impl ControlClient {
             self.client.rpc(Download {
                 source: source.into(),
                 target,
+                announce: true,
             }),
         )
         .await
@@ -275,31 +282,7 @@ impl ControlClient {
         .map_err(Into::into)
     }
 
-    /// Stream per-data Mainline announcement state.
-    ///
-    /// Uses its own connection: a daemon from 0.1.10 or earlier closes the
-    /// connection on this unknown request, which must not take down [`Self::watch`].
-    /// From 0.1.13 on, a daemon rejects only the unknown request, see
-    /// [`is_unsupported`]; requests added later can share the connection.
-    /// Fails, or the stream ends, if the daemon does not support it.
-    pub async fn watch_announce(
-        &self,
-    ) -> Result<mpsc::Receiver<RpcResult<crate::AnnounceSnapshot>>> {
-        let client: Client<ControlProtocol> = Client::iroh(
-            self.endpoint.clone(),
-            self.addr.clone(),
-            crate::CONTROL_ALPN,
-        );
-        tokio::time::timeout(
-            Duration::from_secs(10),
-            client.server_streaming(crate::WatchAnnounce {}, 8),
-        )
-        .await
-        .context("announce watch request timed out")?
-        .map_err(Into::into)
-    }
-
-    /// Only send this to a daemon whose [`Self::watch_announce`] works.
+    /// Turns Mainline announcement of one data item on or off.
     pub async fn set_announce(&self, id: u64, announce: bool) -> Result<()> {
         tokio::time::timeout(
             Duration::from_secs(10),

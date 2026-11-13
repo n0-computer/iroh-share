@@ -37,6 +37,7 @@ tracing-subscriber.workspace = true
 iroh-share-proto = { workspace = true, features = ["client"] }
 
 [dev-dependencies]
+n0-schema = { git = "https://github.com/n0-computer/n0-schema", branch = "std-url-iroh-atoms" }
 pkarr = { version = "8.0", default-features = false, features = ["signed_packet"] }
 udp-addr-index = "0.1.6"
 bao-tree = "0.17"

@@ -35,8 +35,8 @@ impl Model {
                 self.names.remove(&label);
             }
             WatchEvent::SnapshotComplete => self.ready = true,
-            // Only sent for clients from 0.1.7 and earlier.
-            WatchEvent::GatewayUpdated(_) => {}
+            // The network task delivers these as `Update::Announce`.
+            WatchEvent::AnnounceUpdated(_) => {}
         }
         if self
             .selected_name
