@@ -1553,7 +1553,7 @@ fn copy_value(ui: &mut egui::Ui, value: &str, label: &str, kind: &str) -> bool {
 }
 /// An icon that copies `value`, and shows a check mark for two seconds after.
 fn copy_icon(ui: &mut egui::Ui, icon: Icon, value: &str, label: &str) {
-    let id = ui.id().with(("copied", label, value));
+    let id = ui.scope_id().with(("copied", label, value));
     let now = ui.input(|i| i.time);
     let copied = ui
         .ctx()
@@ -1577,7 +1577,7 @@ fn copy_button(
     kind: &str,
     button: impl FnOnce(bool) -> egui::Button<'static>,
 ) -> egui::Response {
-    let id = ui.id().with(("copied", kind, value));
+    let id = ui.scope_id().with(("copied", kind, value));
     let now = ui.input(|i| i.time);
     let copied = ui
         .ctx()
@@ -1613,9 +1613,7 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
     let response = ui
         .add(egui::Button::new("").min_size(egui::vec2(24.0, 24.0)))
         .on_hover_text(label);
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
-    });
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     if ui.is_rect_visible(response.rect) {
         let painter = ui.painter();
         let stroke = ui.style().interact(&response).fg_stroke;
