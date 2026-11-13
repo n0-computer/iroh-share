@@ -8,6 +8,14 @@ use std::{
     time::Duration,
 };
 
+/// Returns true if a [`ControlClient`] call failed because the daemon does not
+/// know the request; see [`crate::is_unsupported_request`].
+pub fn is_unsupported(err: &anyhow::Error) -> bool {
+    err.chain()
+        .filter_map(|err| err.downcast_ref::<irpc::Error>())
+        .any(crate::is_unsupported_request)
+}
+
 pub fn default_state_dir() -> Result<PathBuf> {
     dirs::state_dir()
         .or_else(dirs::data_local_dir)
@@ -265,6 +273,8 @@ impl ControlClient {
     ///
     /// Uses its own connection: a daemon from 0.1.10 or earlier closes the
     /// connection on this unknown request, which must not take down [`Self::watch`].
+    /// From 0.1.13 on, a daemon rejects only the unknown request, see
+    /// [`is_unsupported`]; requests added later can share the connection.
     /// Fails, or the stream ends, if the daemon does not support it.
     pub async fn watch_announce(
         &self,

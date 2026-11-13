@@ -15,6 +15,15 @@ pub use iroh_blobs::{ticket::BlobTicket, Hash};
 pub use url::Url;
 /// Control shares the blob endpoint; only allowlisted endpoint IDs may use it.
 pub const CONTROL_ALPN: &[u8] = b"/iroh-share/control/5";
+
+/// Returns true if the daemon rejected a request because it does not know it.
+///
+/// A daemon from 0.1.13 on rejects such a request on its own and keeps the
+/// connection. An older daemon closes the whole connection instead, which
+/// looks like any other closed connection, so this returns false for it.
+pub fn is_unsupported_request(err: &irpc::Error) -> bool {
+    err.remote_code() == Some(irpc::rpc::ErrorCode::RequestDecodeFailed)
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AllowControl {
     pub endpoint: EndpointId,
