@@ -1,8 +1,10 @@
 use crate::{JobError, Url};
+use n0_schema::schema;
 use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 
 /// A pkarr public key, encoded as canonical z-base-32 for display.
+#[schema(Atom(name = "NameKey"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NameKey(pub [u8; 32]);
 impl fmt::Display for NameKey {
@@ -32,6 +34,7 @@ impl NameKey {
     }
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NameTarget {
     Url(Url),
@@ -57,6 +60,7 @@ impl NameTarget {
     }
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NameState {
     Disabled,
@@ -79,6 +83,7 @@ pub enum NameState {
     NoRecords,
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Name {
     pub label: String,
@@ -87,29 +92,35 @@ pub struct Name {
     pub state: NameState,
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateName {
     pub label: String,
     pub target: NameTarget,
 }
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateName {
     pub label: String,
     pub target: NameTarget,
 }
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoveName {
     pub label: String,
 }
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListNames {}
 
 /// What happened to one key of an imported archive.
+#[schema(Nominal)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportedName {
     pub key: NameKey,
     pub outcome: ImportOutcome,
 }
+#[schema(Nominal)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ImportOutcome {
     Imported { label: String },

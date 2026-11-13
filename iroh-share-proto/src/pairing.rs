@@ -1,6 +1,7 @@
 //! Single-client enrollment on the daemon's shared iroh endpoint.
 use iroh::EndpointAddr;
 use iroh_tickets::{endpoint::EndpointTicket, ParseError, Ticket};
+use n0_schema::schema;
 use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 use subtle::ConstantTimeEq;
@@ -29,6 +30,7 @@ impl fmt::Debug for PairingSecret {
 }
 
 /// A bearer invitation for one client. Displaying it reveals the enrollment secret.
+#[schema(Atom(name = "PairingTicket"))]
 #[derive(Debug, Clone)]
 pub struct PairingTicket {
     pub addr: EndpointAddr,
@@ -132,6 +134,7 @@ pub enum PairingStatus {
 }
 
 /// Issue an independent invitation for one client.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreatePairingTicket {}
 

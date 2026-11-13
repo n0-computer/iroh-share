@@ -2749,6 +2749,7 @@ dependencies = [
  "irpc",
  "n0-future",
  "n0-mainline",
+ "n0-schema",
  "pkarr",
  "plist",
  "rand 0.10.3",
@@ -2792,6 +2793,7 @@ dependencies = [
  "iroh-blobs",
  "iroh-tickets",
  "irpc",
+ "n0-schema",
  "postcard",
  "rand 0.10.3",
  "rustix 1.1.4",
@@ -3366,6 +3368,34 @@ dependencies = [
  "sha1_smol",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "n0-schema"
+version = "0.1.0"
+source = "git+https://github.com/n0-computer/n0-schema?branch=std-url-iroh-atoms#8053c1d747be192b5d8012d5a8f35c4bca26324b"
+dependencies = [
+ "blake3",
+ "bytes",
+ "iroh-base",
+ "irpc",
+ "n0-schema-derive",
+ "postcard",
+ "serde",
+ "url",
+]
+
+[[package]]
+name = "n0-schema-derive"
+version = "0.1.0"
+source = "git+https://github.com/n0-computer/n0-schema?branch=std-url-iroh-atoms#8053c1d747be192b5d8012d5a8f35c4bca26324b"
+dependencies = [
+ "blake3",
+ "postcard",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn 3.0.6",
 ]
 
 [[package]]

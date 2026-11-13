@@ -130,7 +130,7 @@ async fn session(
                 // after reconnecting. Only enable input after this drain.
                 while actions.try_recv().is_ok() {}
             }
-            tx.send(Update::Event(event)).await?;
+            tx.send(update(event)).await?;
             if done {
                 return Ok::<_, anyhow::Error>(());
             }
@@ -139,25 +139,13 @@ async fn session(
     tokio::time::timeout(Duration::from_secs(15), snapshot)
         .await
         .context("initial snapshot timed out")??;
-    // Older daemons drop the probe's own connection; the session carries on without it.
-    let mut announce = client.watch_announce().await.ok();
     let mut completions = tokio::task::JoinSet::new();
     loop {
         tokio::select! {
             _ = tx.closed() => return Ok(()),
-            snapshot = async { announce.as_mut().expect("guarded").recv().await }, if announce.is_some() => {
-                let snapshot = match snapshot {
-                    Ok(Some(Ok(snapshot))) => Some(snapshot),
-                    _ => {
-                        announce = None;
-                        None
-                    }
-                };
-                tx.send(Update::Announce(snapshot)).await?;
-            }
             event = events.recv() => {
                 let event = event?.context("daemon disconnected")?.map_err(anyhow::Error::msg)?;
-                tx.send(Update::Event(event)).await?;
+                tx.send(update(event)).await?;
             }
             Some(result) = completions.join_next() => {
                 if let Ok(update) = result { tx.send(update).await?; }
@@ -224,7 +212,7 @@ async fn session(
                     }),
                     Action::Refresh(id) => client.refresh(id).await.map(|()| "Refreshing directory… Its name will follow the updated content.".into()),
                     Action::Publish { path, label, include_directory_name } => {
-                        match client.share_with_options(path, include_directory_name).await {
+                        match client.share_with_options(path, include_directory_name, true).await {
                             Ok(job) => {
                                 let name_error = if let Some(label) = label {
                                     client.create_name(label, iroh_share_proto::NameTarget::Job(job.id)).await.err().map(|e| format!("{e:#}"))
@@ -253,5 +241,13 @@ fn import_summary(outcomes: &[iroh_share_proto::ImportedName]) -> String {
     match skipped {
         0 => format!("Imported {imported} pkarr names"),
         _ => format!("Imported {imported} pkarr names; skipped {skipped} already managed"),
+    }
+}
+
+/// Announcement settings go to their own update; everything else is a model event.
+fn update(event: WatchEvent) -> Update {
+    match event {
+        WatchEvent::AnnounceUpdated(snapshot) => Update::Announce(Some(snapshot)),
+        event => Update::Event(event),
     }
 }
