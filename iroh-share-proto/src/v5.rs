@@ -1,4 +1,4 @@
-//! The control protocol of daemons and clients up to 0.1.13, on [`CONTROL_ALPN`].
+//! The control protocol of daemons and clients up to 0.1.14, on [`CONTROL_ALPN`].
 //!
 //! The daemon still serves it for older clients. Requests are identified by
 //! their position in [`ControlProtocol`], so its variants must never be

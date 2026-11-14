@@ -1241,7 +1241,7 @@ mod tests {
             .await?
             .map_err(anyhow::Error::msg)?
             .is_empty());
-        // Clients up to 0.1.13 use the old protocol, through the translation.
+        // Clients up to 0.1.14 use the old protocol, through the translation.
         let mut old_updates = v5.server_streaming(iroh_share_proto::Watch {}, 64).await?;
         assert!(matches!(
             old_updates.recv().await?.context("watch closed")?.map_err(anyhow::Error::msg)?,

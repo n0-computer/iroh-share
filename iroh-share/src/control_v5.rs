@@ -1,4 +1,4 @@
-//! Serves the 0.1.13 control protocol for older clients, by translating to the current one.
+//! Serves the control protocol of 0.1.14 and earlier for older clients, by translating to the current one.
 use iroh_share_proto::{
     self as v6,
     v5::{self, ControlMessage},
@@ -12,7 +12,7 @@ use irpc::{
 pub(crate) const GATEWAY_REMOVED: &str =
     "This daemon no longer includes a gateway. Install Iroh Link Gateway to browse blake3.net and pkarr.net links.";
 
-/// Returns a sender for 0.1.13 requests, which are answered through `actor`.
+/// Returns a sender for requests of 0.1.14 and earlier, which are answered through `actor`.
 pub fn serve(actor: Client<v6::ControlProtocol>) -> irpc::LocalSender<v5::ControlProtocol> {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<ControlMessage>(64);
     tokio::spawn(async move {
@@ -133,7 +133,7 @@ async fn forward_map<Req, Res, Old>(
 }
 
 /// The current watch stream, without announcement events, and with the
-/// gateway snapshot that 0.1.13 sent before the end of the snapshot.
+/// gateway snapshot that daemons up to 0.1.14 sent before the end of the snapshot.
 async fn watch(actor: &Client<v6::ControlProtocol>, tx: mpsc::Sender<RpcResult<v5::WatchEvent>>) {
     let mut events = match actor.server_streaming(v6::Watch {}, 128).await {
         Ok(events) => events,

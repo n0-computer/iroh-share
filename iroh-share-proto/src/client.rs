@@ -265,7 +265,7 @@ impl ControlClient {
 
     /// Lists the requests that the daemon supports, with their schema and docs.
     ///
-    /// Daemons up to 0.1.13 do not support this.
+    /// Daemons up to 0.1.14 do not support this.
     pub async fn list_requests(&self) -> Result<Vec<n0_schema::meta::CaseInfo>> {
         tokio::time::timeout(
             Duration::from_secs(10),
