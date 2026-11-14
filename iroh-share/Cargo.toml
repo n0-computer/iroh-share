@@ -28,7 +28,7 @@ tokio.workspace = true
 iroh.workspace = true
 iroh-blobs.workspace = true
 n0-future.workspace = true
-n0-schema = { git = "https://github.com/n0-computer/n0-schema", branch = "meta", features = ["meta"] }
+n0-schema = { version = "0.2", features = ["meta"] }
 walkdir.workspace = true
 blake3.workspace = true
 iroh-mainline-endpoint-discovery.workspace = true

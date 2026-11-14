@@ -3372,8 +3372,9 @@ dependencies = [
 
 [[package]]
 name = "n0-schema"
-version = "0.1.0"
-source = "git+https://github.com/n0-computer/n0-schema?branch=meta#694fb2aab3ef0f8f2f3d7af815feee73d85a03dd"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1928ce242d8172d5e9e9014755d30444797333ea452d0acac60a41c6f5b43dd2"
 dependencies = [
  "blake3",
  "bytes",
@@ -3388,8 +3389,9 @@ dependencies = [
 
 [[package]]
 name = "n0-schema-derive"
-version = "0.1.0"
-source = "git+https://github.com/n0-computer/n0-schema?branch=meta#694fb2aab3ef0f8f2f3d7af815feee73d85a03dd"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13fa4b552a6189058c32b2c0953e5f667b63559b5d6d0f49d22c83ead52cfd72"
 dependencies = [
  "blake3",
  "postcard",
