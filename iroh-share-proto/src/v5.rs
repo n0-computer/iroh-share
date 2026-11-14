@@ -13,9 +13,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AllowControl, AnnounceSnapshot, CompletePath, CreateName, CreatePairingTicket, DownloadSource,
-    EndpointId, ExportName, ExportNames, GetImportDirectory, ImportNames, ImportedName, Job, List,
-    ListControl, ListNames, Name, PairingTicket, PathCompletions, Refresh, Remove, RemoveName,
-    RevokeControl, RpcResult, SetAnnounce, Shutdown, UpdateName, Watch,
+    EndpointId, ExportName, ExportNames, GetImportDirectory, ImportNames, ImportedName, JobV0,
+    List, ListControl, ListNames, Name, PairingTicket, PathCompletions, Refresh, Remove,
+    RemoveName, RevokeControl, RpcResult, SetAnnounce, Shutdown, UpdateName, Watch,
 };
 
 #[path = "gateway.rs"]
@@ -56,7 +56,7 @@ pub struct WatchAnnounce {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WatchEvent {
-    JobUpdated(Box<Job>),
+    JobUpdated(Box<JobV0>),
     SnapshotComplete,
     NameUpdated(Box<Name>),
     NameRemoved { label: String },
@@ -73,7 +73,7 @@ pub enum ControlProtocol {
     AllowControl(AllowControl),
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     RevokeControl(RevokeControl),
-    #[rpc(tx=oneshot::Sender<RpcResult<Job>>)]
+    #[rpc(tx=oneshot::Sender<RpcResult<JobV0>>)]
     Share(Share),
     #[rpc(tx=oneshot::Sender<RpcResult<Name>>)]
     CreateName(CreateName),
@@ -83,9 +83,9 @@ pub enum ControlProtocol {
     RemoveName(RemoveName),
     #[rpc(tx=oneshot::Sender<RpcResult<Vec<Name>>>)]
     ListNames(ListNames),
-    #[rpc(tx=oneshot::Sender<RpcResult<Job>>)]
+    #[rpc(tx=oneshot::Sender<RpcResult<JobV0>>)]
     Download(Download),
-    #[rpc(tx=oneshot::Sender<RpcResult<Vec<Job>>>)]
+    #[rpc(tx=oneshot::Sender<RpcResult<Vec<JobV0>>>)]
     List(List),
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     Remove(Remove),
@@ -103,7 +103,7 @@ pub enum ControlProtocol {
     Shutdown(Shutdown),
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     Refresh(Refresh),
-    #[rpc(tx=oneshot::Sender<RpcResult<Job>>)]
+    #[rpc(tx=oneshot::Sender<RpcResult<JobV0>>)]
     Import(Import),
     #[rpc(tx=oneshot::Sender<RpcResult<PathBuf>>)]
     GetImportDirectory(GetImportDirectory),
@@ -113,7 +113,7 @@ pub enum ControlProtocol {
     ExportName(ExportName),
     #[rpc(tx=oneshot::Sender<RpcResult<Vec<ImportedName>>>)]
     ImportNames(ImportNames),
-    #[rpc(tx=oneshot::Sender<RpcResult<Job>>)]
+    #[rpc(tx=oneshot::Sender<RpcResult<JobV0>>)]
     ImportWithOptions(ImportWithOptions),
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     SetAnnounce(SetAnnounce),
