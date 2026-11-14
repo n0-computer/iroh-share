@@ -3348,15 +3348,15 @@ dependencies = [
 
 [[package]]
 name = "n0-mainline"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b739fb0145326fa2287f704a5a3bceb5d21c5b6f1b09436403b504f85c2e6ded"
+checksum = "b46bd27a3729d0e94ca0ce610f72d0d71e5955d66e4f3d37241c56693fe41587"
 dependencies = [
  "crc",
  "dyn-clone",
  "ed25519-dalek",
  "futures-core",
- "lru 0.18.4",
+ "lru 0.19.0",
  "n0-error",
  "noq-udp",
  "rand 0.10.3",
