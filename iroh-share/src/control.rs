@@ -183,16 +183,30 @@ pub struct Control<S = ControlProtocol> {
     access: Access,
     protocol: irpc::iroh::IrohProtocol<S>,
 }
-impl<S: irpc::rpc::RemoteService> Control<S> {
-    pub fn new(access: Access, sender: irpc::LocalSender<S>) -> Self {
+impl<S: irpc::Service> Control<S> {
+    pub fn new(access: Access, handler: impl Into<irpc::rpc::Handler<S>>) -> Self {
         Self {
             access,
             // A request this daemon does not know fails on its own, so a newer
             // client can try it without losing the connection and its watches.
-            protocol: irpc::iroh::IrohProtocol::new(
-                irpc::rpc::Handler::from_sender(sender).skip_bad_requests(true),
-            ),
+            protocol: irpc::iroh::IrohProtocol::new(handler.into().skip_bad_requests(true)),
         }
+    }
+}
+
+/// What the daemon serves on [`iroh_share_proto::CONTROL_ALPN`]: the control
+/// protocol, and the meta protocol that lists its requests.
+#[n0_schema::combine_services]
+#[derive(Debug)]
+pub enum ControlServer {
+    Meta(n0_schema::meta::MetaProtocol),
+    Control(ControlProtocol),
+}
+
+impl ControlServer {
+    /// Returns the handler for the control protocol, which sends its requests to `actor`.
+    pub fn serve(actor: irpc::LocalSender<ControlProtocol>) -> irpc::rpc::Handler<Self> {
+        Self::handler(n0_schema::meta::serve::<Self>(), actor)
     }
 }
 impl<S> ProtocolHandler for Control<S>

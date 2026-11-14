@@ -26,6 +26,8 @@ pub fn default_state_dir() -> Result<PathBuf> {
 #[derive(Clone)]
 pub struct ControlClient {
     client: Client<ControlProtocol>,
+    /// Lists the requests of the daemon, on the same connection as `client`.
+    meta: Client<n0_schema::meta::MetaProtocol>,
     endpoint: Endpoint,
     remote: bool,
 }
@@ -33,12 +35,15 @@ pub struct ControlClient {
 impl ControlClient {
     /// Use a caller-owned iroh endpoint, including an embedded UI's identity.
     pub fn from_endpoint(endpoint: Endpoint, addr: EndpointAddr) -> Self {
+        // Control and meta requests share one connection, which reconnects when needed.
+        let connection = irpc::iroh::IrohLazyRemoteConnection::new(
+            endpoint.clone(),
+            addr,
+            crate::CONTROL_ALPN.to_vec(),
+        );
         Self {
-            client: irpc::Client::<ControlProtocol>::iroh(
-                endpoint.clone(),
-                addr,
-                crate::CONTROL_ALPN,
-            ),
+            client: Client::boxed(connection.clone()),
+            meta: Client::boxed(connection),
             endpoint,
             remote: true,
         }
@@ -256,6 +261,32 @@ impl ControlClient {
         .await
         .context("download request timed out; check the job list before retrying")??
         .map_err(anyhow::Error::msg)
+    }
+
+    /// Lists the requests that the daemon supports, with their schema and docs.
+    ///
+    /// Daemons up to 0.1.13 do not support this.
+    pub async fn list_requests(&self) -> Result<Vec<n0_schema::meta::CaseInfo>> {
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            self.meta.rpc(n0_schema::meta::ListCases {}),
+        )
+        .await
+        .context("request list timed out")?
+        .context("daemon does not list its requests")
+    }
+
+    /// Returns whether the daemon supports request `R`.
+    pub async fn supports<R>(&self) -> Result<bool>
+    where
+        R: n0_schema::ChannelsSchema<ControlProtocol>,
+    {
+        let hash = n0_schema::request_hash::<ControlProtocol, R>();
+        Ok(self
+            .list_requests()
+            .await?
+            .iter()
+            .any(|case| case.hash == hash))
     }
 
     pub async fn list(&self) -> Result<Vec<Job>> {

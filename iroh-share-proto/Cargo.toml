@@ -17,7 +17,7 @@ z32.workspace = true
 serde.workspace = true
 iroh-blobs.workspace = true
 irpc.workspace = true
-n0-schema = { git = "https://github.com/n0-computer/n0-schema", branch = "std-url-iroh-atoms", features = ["url", "iroh-base"] }
+n0-schema = { git = "https://github.com/n0-computer/n0-schema", branch = "meta", features = ["url", "iroh-base", "meta"] }
 iroh.workspace = true
 
 [features]

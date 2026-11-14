@@ -28,6 +28,7 @@ tokio.workspace = true
 iroh.workspace = true
 iroh-blobs.workspace = true
 n0-future.workspace = true
+n0-schema = { git = "https://github.com/n0-computer/n0-schema", branch = "meta", features = ["meta"] }
 walkdir.workspace = true
 blake3.workspace = true
 iroh-mainline-endpoint-discovery.workspace = true
@@ -37,7 +38,6 @@ tracing-subscriber.workspace = true
 iroh-share-proto = { workspace = true, features = ["client"] }
 
 [dev-dependencies]
-n0-schema = { git = "https://github.com/n0-computer/n0-schema", branch = "std-url-iroh-atoms" }
 pkarr = { version = "8.0", default-features = false, features = ["signed_packet"] }
 udp-addr-index = "0.1.6"
 bao-tree = "0.17"
