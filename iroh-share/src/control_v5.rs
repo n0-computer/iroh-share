@@ -2,7 +2,7 @@
 use iroh_share_proto::{
     self as v6,
     v5::{self, ControlMessage},
-    AnnounceSnapshot, RpcResult,
+    AnnounceSnapshot, JobV0, RpcResult,
 };
 use irpc::{
     channel::{mpsc, none::NoReceiver, oneshot},
@@ -36,7 +36,7 @@ async fn handle(actor: Client<v6::ControlProtocol>, message: ControlMessage) {
                 include_directory_name: inner.include_directory_name,
                 announce: true,
             };
-            forward(&actor, request, tx).await
+            forward_map(&actor, request, tx, JobV0::from).await
         }
         ControlMessage::CreateName(m) => forward(&actor, m.inner, m.tx).await,
         ControlMessage::UpdateName(m) => forward(&actor, m.inner, m.tx).await,
@@ -49,9 +49,14 @@ async fn handle(actor: Client<v6::ControlProtocol>, message: ControlMessage) {
                 target: inner.target,
                 announce: true,
             };
-            forward(&actor, request, tx).await
+            forward_map(&actor, request, tx, JobV0::from).await
         }
-        ControlMessage::List(m) => forward(&actor, m.inner, m.tx).await,
+        ControlMessage::List(m) => {
+            forward_map(&actor, m.inner, m.tx, |jobs: Vec<v6::Job>| {
+                jobs.into_iter().map(JobV0::from).collect()
+            })
+            .await
+        }
         ControlMessage::Remove(m) => forward(&actor, m.inner, m.tx).await,
         ControlMessage::Watch(m) => watch(&actor, m.tx).await,
         ControlMessage::CompletePath(m) => forward(&actor, m.inner, m.tx).await,
@@ -72,7 +77,7 @@ async fn handle(actor: Client<v6::ControlProtocol>, message: ControlMessage) {
                 include_directory_name: None,
                 announce: None,
             };
-            forward(&actor, request, tx).await
+            forward_map(&actor, request, tx, JobV0::from).await
         }
         ControlMessage::GetImportDirectory(m) => forward(&actor, m.inner, m.tx).await,
         ControlMessage::ExportNames(m) => forward(&actor, m.inner, m.tx).await,
@@ -86,7 +91,7 @@ async fn handle(actor: Client<v6::ControlProtocol>, message: ControlMessage) {
                 include_directory_name: Some(inner.include_directory_name),
                 announce: Some(inner.announce),
             };
-            forward(&actor, request, tx).await
+            forward_map(&actor, request, tx, JobV0::from).await
         }
         ControlMessage::SetAnnounce(m) => forward(&actor, m.inner, m.tx).await,
         ControlMessage::WatchAnnounce(m) => watch_announce(&actor, m.tx).await,
@@ -104,11 +109,27 @@ async fn forward<Req, Res>(
     Req: Channels<v6::ControlProtocol, Tx = oneshot::Sender<RpcResult<Res>>, Rx = NoReceiver>,
     RpcResult<Res>: irpc::RpcMessage,
 {
+    forward_map(actor, request, tx, |res| res).await
+}
+
+/// Sends `request` to the actor, and its answer in the old form back to the old client.
+async fn forward_map<Req, Res, Old>(
+    actor: &Client<v6::ControlProtocol>,
+    request: Req,
+    tx: oneshot::Sender<RpcResult<Old>>,
+    map: impl FnOnce(Res) -> Old,
+) where
+    v6::ControlProtocol: From<Req>,
+    v6::ControlMessage: From<WithChannels<Req, v6::ControlProtocol>>,
+    Req: Channels<v6::ControlProtocol, Tx = oneshot::Sender<RpcResult<Res>>, Rx = NoReceiver>,
+    RpcResult<Res>: irpc::RpcMessage,
+    RpcResult<Old>: irpc::RpcMessage,
+{
     let result = actor
         .rpc(request)
         .await
         .unwrap_or_else(|err| Err(format!("daemon stopped: {err}")));
-    let _ = tx.send(result).await;
+    let _ = tx.send(result.map(map)).await;
 }
 
 /// The current watch stream, without announcement events, and with the
@@ -123,7 +144,9 @@ async fn watch(actor: &Client<v6::ControlProtocol>, tx: mpsc::Sender<RpcResult<v
     };
     while let Ok(Some(event)) = events.recv().await {
         let event = match event {
-            Ok(v6::WatchEvent::JobUpdated(job)) => Ok(v5::WatchEvent::JobUpdated(job)),
+            Ok(v6::WatchEvent::JobUpdated(job)) => {
+                Ok(v5::WatchEvent::JobUpdated(Box::new(JobV0::from(*job))))
+            }
             Ok(v6::WatchEvent::NameUpdated(name)) => Ok(v5::WatchEvent::NameUpdated(name)),
             Ok(v6::WatchEvent::NameRemoved { label }) => Ok(v5::WatchEvent::NameRemoved { label }),
             Ok(v6::WatchEvent::JobRemoved { id }) => Ok(v5::WatchEvent::JobRemoved { id }),

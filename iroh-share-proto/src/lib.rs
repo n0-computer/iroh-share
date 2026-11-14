@@ -197,12 +197,62 @@ pub struct ExportProgress {
     pub files_total: u64,
 }
 
-#[schema(Nominal)]
+/// A data item of the daemon, with its current state.
+///
+/// On the wire, a job is a [`JobWire`], so that its layout can change without
+/// changing the schema hash of every request that returns jobs.
+#[schema(Atom(name = "iroh_share::Job"))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(from = "JobWire", into = "JobWire")]
 pub struct Job {
     pub id: u64,
     pub kind: JobKind,
     pub state: JobState,
+}
+
+/// The first layout of [`Job`], which is also how the v5 protocol encodes jobs.
+///
+/// It includes [`JobKind`] and [`JobState`] as they are now. Changing those
+/// changes this layout, so it needs a new [`JobWire`] variant instead.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobV0 {
+    pub id: u64,
+    pub kind: JobKind,
+    pub state: JobState,
+}
+
+/// The layouts of [`Job`] on the wire, one variant per version.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum JobWire {
+    V0(JobV0),
+}
+
+impl From<Job> for JobV0 {
+    fn from(job: Job) -> Self {
+        let Job { id, kind, state } = job;
+        Self { id, kind, state }
+    }
+}
+
+impl From<JobV0> for Job {
+    fn from(job: JobV0) -> Self {
+        let JobV0 { id, kind, state } = job;
+        Self { id, kind, state }
+    }
+}
+
+impl From<Job> for JobWire {
+    fn from(job: Job) -> Self {
+        Self::V0(job.into())
+    }
+}
+
+impl From<JobWire> for Job {
+    fn from(wire: JobWire) -> Self {
+        match wire {
+            JobWire::V0(job) => job.into(),
+        }
+    }
 }
 
 #[schema(Nominal)]
@@ -253,8 +303,13 @@ pub enum JobState {
     },
 }
 
-#[schema(Nominal)]
+/// An event of a [`Watch`] stream.
+///
+/// On the wire, an event is a [`WatchEventWire`], so that new events or
+/// changed layouts do not change the schema hash of [`Watch`].
+#[schema(Atom(name = "iroh_share::WatchEvent"))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(from = "WatchEventWire", into = "WatchEventWire")]
 pub enum WatchEvent {
     /// A complete job snapshot, both during initial enumeration and live updates.
     JobUpdated(Box<Job>),
@@ -269,6 +324,55 @@ pub enum WatchEvent {
     },
     /// Announcement settings: sent before [`Self::SnapshotComplete`], then on every change.
     AnnounceUpdated(AnnounceSnapshot),
+}
+
+/// The first layout of [`WatchEvent`].
+///
+/// It includes [`Job`], [`Name`] and [`AnnounceSnapshot`] as they are now.
+/// Changing those changes this layout, so it needs a new [`WatchEventWire`]
+/// variant instead. [`Job`] has its own versions, so it can change freely.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WatchEventV0 {
+    JobUpdated(Box<Job>),
+    SnapshotComplete,
+    NameUpdated(Box<Name>),
+    NameRemoved { label: String },
+    JobRemoved { id: u64 },
+    AnnounceUpdated(AnnounceSnapshot),
+}
+
+/// The layouts of [`WatchEvent`] on the wire, one variant per version.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WatchEventWire {
+    V0(WatchEventV0),
+}
+
+impl From<WatchEvent> for WatchEventWire {
+    fn from(event: WatchEvent) -> Self {
+        Self::V0(match event {
+            WatchEvent::JobUpdated(job) => WatchEventV0::JobUpdated(job),
+            WatchEvent::SnapshotComplete => WatchEventV0::SnapshotComplete,
+            WatchEvent::NameUpdated(name) => WatchEventV0::NameUpdated(name),
+            WatchEvent::NameRemoved { label } => WatchEventV0::NameRemoved { label },
+            WatchEvent::JobRemoved { id } => WatchEventV0::JobRemoved { id },
+            WatchEvent::AnnounceUpdated(snapshot) => WatchEventV0::AnnounceUpdated(snapshot),
+        })
+    }
+}
+
+impl From<WatchEventWire> for WatchEvent {
+    fn from(wire: WatchEventWire) -> Self {
+        match wire {
+            WatchEventWire::V0(event) => match event {
+                WatchEventV0::JobUpdated(job) => Self::JobUpdated(job),
+                WatchEventV0::SnapshotComplete => Self::SnapshotComplete,
+                WatchEventV0::NameUpdated(name) => Self::NameUpdated(name),
+                WatchEventV0::NameRemoved { label } => Self::NameRemoved { label },
+                WatchEventV0::JobRemoved { id } => Self::JobRemoved { id },
+                WatchEventV0::AnnounceUpdated(snapshot) => Self::AnnounceUpdated(snapshot),
+            },
+        }
+    }
 }
 
 /// Export all naming keys and current records as a ZIP archive.
@@ -366,4 +470,57 @@ pub enum ControlProtocol {
     /// Turns Mainline announcement of one data item on or off. Direct tickets keep working either way.
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     SetAnnounce(SetAnnounce),
+}
+
+#[cfg(test)]
+mod wire_tests {
+    use super::*;
+    use n0_schema::HasSchema;
+
+    fn job() -> Job {
+        Job {
+            id: 7,
+            kind: JobKind::Share {
+                path: "/data".into(),
+                include_directory_name: true,
+            },
+            state: JobState::Queued,
+        }
+    }
+
+    /// A job is its version tag followed by the old layout, which v5 still sends.
+    #[test]
+    fn job_is_versioned_and_v0_keeps_the_old_layout() {
+        let job = job();
+        let current = postcard::to_allocvec(&job).unwrap();
+        let v0 = postcard::to_allocvec(&JobV0::from(job.clone())).unwrap();
+        assert_eq!(current[0], 0, "version tag of V0");
+        assert_eq!(&current[1..], &v0[..]);
+        let decoded: Job = postcard::from_bytes(&current).unwrap();
+        assert_eq!(decoded.id, 7);
+        let old: JobV0 = postcard::from_bytes(&v0).unwrap();
+        assert_eq!(old.id, 7);
+    }
+
+    #[test]
+    fn watch_event_is_versioned() {
+        let event = WatchEvent::JobUpdated(Box::new(job()));
+        let bytes = postcard::to_allocvec(&event).unwrap();
+        assert_eq!(bytes[0], 0, "version tag of V0");
+        let decoded: WatchEvent = postcard::from_bytes(&bytes).unwrap();
+        assert!(matches!(decoded, WatchEvent::JobUpdated(job) if job.id == 7));
+    }
+
+    /// The layouts are behind atoms, so they do not show up in request hashes.
+    #[test]
+    fn job_and_watch_event_are_atoms() {
+        assert_eq!(
+            Job::schema(),
+            n0_schema::Schema::Atom("iroh_share::Job".into())
+        );
+        assert_eq!(
+            WatchEvent::schema(),
+            n0_schema::Schema::Atom("iroh_share::WatchEvent".into())
+        );
+    }
 }
