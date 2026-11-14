@@ -237,13 +237,13 @@ pub enum JobState {
         progress: DownloadProgress,
     },
     Exporting {
-        #[schema(atom = "Hash")]
+        #[schema(atom = "blake3::Hash")]
         root_hash: Hash,
         progress: ExportProgress,
     },
     /// The root hash is available through `ticket.hash()`.
     Seeding {
-        #[schema(atom = "BlobTicket")]
+        #[schema(atom = "iroh_blobs::BlobTicket")]
         ticket: BlobTicket,
         /// Active requests addressed to this collection root (not distinct peers).
         active_uploads: u32,
@@ -300,49 +300,70 @@ pub type RpcResult<T> = Result<T, String>;
 #[serialize_service(ControlProtocol)]
 #[derive(Debug)]
 pub enum ControlProtocol {
+    /// Lists the endpoint IDs that may use the control protocol.
     #[rpc(tx=oneshot::Sender<RpcResult<Vec<EndpointId>>>)]
     ListControl(ListControl),
+    /// Allows an endpoint ID to use the control protocol.
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     AllowControl(AllowControl),
+    /// Revokes the control access of an endpoint ID, and closes its connections.
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     RevokeControl(RevokeControl),
+    /// Imports a local file or directory into the store and seeds it, as a new data item.
     #[rpc(tx=oneshot::Sender<RpcResult<Job>>)]
     Share(Share),
+    /// Creates a mutable name that points to a data item or a fixed hash, and publishes it.
     #[rpc(tx=oneshot::Sender<RpcResult<Name>>)]
     CreateName(CreateName),
+    /// Points an existing name at a different target, and publishes the new record.
     #[rpc(tx=oneshot::Sender<RpcResult<Name>>)]
     UpdateName(UpdateName),
+    /// Stops publishing a name and removes it from the daemon.
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     RemoveName(RemoveName),
+    /// Lists all names that the daemon manages.
     #[rpc(tx=oneshot::Sender<RpcResult<Vec<Name>>>)]
     ListNames(ListNames),
+    /// Downloads a collection into a local directory chosen by the client, and seeds it.
     #[rpc(tx=oneshot::Sender<RpcResult<Job>>)]
     Download(Download),
+    /// Lists all data items with their current state.
     #[rpc(tx=oneshot::Sender<RpcResult<Vec<Job>>>)]
     List(List),
+    /// Stops seeding a data item and removes it from the daemon. Files on disk are kept.
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     Remove(Remove),
+    /// Streams the current data items, names and announcement settings, then each change as it happens.
     #[rpc(tx=mpsc::Sender<RpcResult<WatchEvent>>)]
     Watch(Watch),
+    /// Completes a path on the daemon's filesystem, for path inputs in remote clients.
     #[rpc(tx=oneshot::Sender<RpcResult<PathCompletions>>)]
     CompletePath(CompletePath),
+    /// Creates a one-time ticket that grants a new client control access.
     #[rpc(tx=oneshot::Sender<RpcResult<PairingTicket>>)]
     CreatePairingTicket(CreatePairingTicket),
+    /// Stops the daemon gracefully.
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     Shutdown(Shutdown),
-    /// Rescan a local directory followed by at least one managed name.
+    /// Rescans a local directory followed by at least one managed name.
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     Refresh(Refresh),
+    /// Downloads a ticket or link into the daemon's import directory and seeds it, or updates an earlier import with `id`.
     #[rpc(tx=oneshot::Sender<RpcResult<Job>>)]
     Import(Import),
+    /// Returns the directory on the daemon's filesystem that ticket imports go to.
     #[rpc(tx=oneshot::Sender<RpcResult<PathBuf>>)]
     GetImportDirectory(GetImportDirectory),
+    /// Exports the keys and current records of all names as a ZIP archive.
     #[rpc(tx=oneshot::Sender<RpcResult<Vec<u8>>>)]
     ExportNames(ExportNames),
+    /// Exports the key and current record of one name as a ZIP archive.
     #[rpc(tx=oneshot::Sender<RpcResult<Vec<u8>>>)]
     ExportName(ExportName),
+    /// Restores names from an archive made by `ExportNames` or `ExportName`, skipping keys the daemon already has.
     #[rpc(tx=oneshot::Sender<RpcResult<Vec<ImportedName>>>)]
     ImportNames(ImportNames),
+    /// Turns Mainline announcement of one data item on or off. Direct tickets keep working either way.
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     SetAnnounce(SetAnnounce),
 }

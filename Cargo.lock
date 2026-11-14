@@ -3373,7 +3373,7 @@ dependencies = [
 [[package]]
 name = "n0-schema"
 version = "0.1.0"
-source = "git+https://github.com/n0-computer/n0-schema?branch=std-url-iroh-atoms#8053c1d747be192b5d8012d5a8f35c4bca26324b"
+source = "git+https://github.com/n0-computer/n0-schema?branch=meta#694fb2aab3ef0f8f2f3d7af815feee73d85a03dd"
 dependencies = [
  "blake3",
  "bytes",
@@ -3382,13 +3382,14 @@ dependencies = [
  "n0-schema-derive",
  "postcard",
  "serde",
+ "tokio",
  "url",
 ]
 
 [[package]]
 name = "n0-schema-derive"
 version = "0.1.0"
-source = "git+https://github.com/n0-computer/n0-schema?branch=std-url-iroh-atoms#8053c1d747be192b5d8012d5a8f35c4bca26324b"
+source = "git+https://github.com/n0-computer/n0-schema?branch=meta#694fb2aab3ef0f8f2f3d7af815feee73d85a03dd"
 dependencies = [
  "blake3",
  "postcard",

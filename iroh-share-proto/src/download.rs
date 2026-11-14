@@ -23,7 +23,7 @@ pub enum DiscoveryMode {
 #[schema(Nominal)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DownloadSource {
-    #[schema(atom = "Hash")]
+    #[schema(atom = "blake3::Hash")]
     pub hash: Hash,
     /// Empty when no provider addresses are supplied.
     pub providers: Vec<iroh::EndpointAddr>,

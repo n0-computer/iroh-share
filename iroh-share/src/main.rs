@@ -76,6 +76,8 @@ enum CommandLine {
     Remove {
         id: u64,
     },
+    /// List the control requests that the daemon supports, with their schema and docs.
+    Protocol,
 }
 
 #[derive(Subcommand)]
@@ -780,9 +782,9 @@ async fn daemon(
         )
         .accept(
             iroh_share_proto::CONTROL_ALPN,
-            control::Control::<iroh_share_proto::ControlProtocol>::new(
+            control::Control::new(
                 access.clone(),
-                irpc::LocalSender::from(tx),
+                control::ControlServer::serve(irpc::LocalSender::from(tx)),
             ),
         )
         .spawn();
@@ -980,6 +982,15 @@ async fn client(state_dir: &Path, command: CommandLine) -> Result<()> {
                 }
             }
             CommandLine::Remove { id } => client.remove(id).await?,
+            CommandLine::Protocol => {
+                for case in client.list_requests().await? {
+                    let hash: String = case.hash[..8].iter().map(|b| format!("{b:02x}")).collect();
+                    println!("{hash} {}: {}", case.name, case.schema);
+                    for line in case.docs.lines() {
+                        println!("    {line}");
+                    }
+                }
+            }
             CommandLine::Names { command } => match command {
                 NameCommand::Create { label, target } => {
                     let name = client.create_name(label, target.into_target()).await?;
@@ -1135,9 +1146,9 @@ mod tests {
             )
             .accept(
                 iroh_share_proto::CONTROL_ALPN,
-                control::Control::<iroh_share_proto::ControlProtocol>::new(
+                control::Control::new(
                     access.clone(),
-                    irpc::LocalSender::from(tx),
+                    control::ControlServer::serve(irpc::LocalSender::from(tx)),
                 ),
             )
             .spawn();
@@ -1191,6 +1202,24 @@ mod tests {
                 .map_err(anyhow::Error::msg)?,
             WatchEvent::SnapshotComplete
         ));
+        // The daemon lists its requests, with their hashes and docs.
+        let meta = irpc::Client::<n0_schema::meta::MetaProtocol>::iroh(
+            control_client.clone(),
+            endpoint.addr(),
+            iroh_share_proto::CONTROL_ALPN,
+        );
+        let cases = meta.rpc(n0_schema::meta::ListCases {}).await?;
+        assert_eq!(cases[0].name, "ListCases");
+        let share = cases
+            .iter()
+            .find(|case| case.hash == n0_schema::request_hash::<ControlProtocol, Share>())
+            .context("Share is listed")?;
+        assert_eq!(share.name, "Share");
+        assert!(share.docs.contains("seeds"), "{}", share.docs);
+        assert!(
+            cases.iter().all(|case| !case.docs.is_empty()),
+            "every request is documented"
+        );
         // A request this daemon does not know fails alone; the connection stays.
         let later = irpc::Client::<future::FutureProtocol>::iroh(
             control_client.clone(),
