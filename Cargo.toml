@@ -31,8 +31,8 @@ iroh-blobs = "0.105"
 n0-future = "0.3"
 walkdir = "2"
 blake3 = "1"
-iroh-mainline-endpoint-discovery = "0.1.6"
-n0-mainline = "0.7.2"
+iroh-mainline-endpoint-discovery = "0.2.0"
+n0-mainline = "0.8.0"
 
 tempfile = "3"
 crossterm = { version = "0.29", features = ["event-stream"] }
