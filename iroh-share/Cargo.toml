@@ -37,7 +37,7 @@ tracing-subscriber.workspace = true
 iroh-share-proto = { workspace = true, features = ["client"] }
 
 [dev-dependencies]
-pkarr = { version = "8.0", default-features = false, features = ["signed_packet"] }
+pkarr = { version = "9.0", default-features = false, features = ["signed_packet"] }
 udp-addr-index = "0.2.0"
 bao-tree = "0.17"
 tempfile.workspace = true
