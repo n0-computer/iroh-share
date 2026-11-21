@@ -8,13 +8,16 @@ use irpc::{
     channel::{mpsc, oneshot},
     rpc_requests,
 };
+use n0_schema::{schema, serialize_service};
 use serde::{Deserialize, Serialize};
 
 pub use iroh::EndpointId;
 pub use iroh_blobs::{ticket::BlobTicket, Hash};
 pub use url::Url;
 /// Control shares the blob endpoint; only allowlisted endpoint IDs may use it.
-pub const CONTROL_ALPN: &[u8] = b"/iroh-share/control/5";
+pub const CONTROL_ALPN: &[u8] = b"/iroh-share/control/6";
+
+pub mod v5;
 
 /// Returns true if the daemon rejected a request because it does not know it.
 ///
@@ -24,22 +27,22 @@ pub const CONTROL_ALPN: &[u8] = b"/iroh-share/control/5";
 pub fn is_unsupported_request(err: &irpc::Error) -> bool {
     err.remote_code() == Some(irpc::rpc::ErrorCode::RequestDecodeFailed)
 }
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AllowControl {
     pub endpoint: EndpointId,
 }
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RevokeControl {
     pub endpoint: EndpointId,
 }
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListControl {}
 
 mod download;
 pub use download::*;
-
-mod gateway;
-pub use gateway::*;
 
 mod pairing;
 pub use pairing::*;
@@ -47,36 +50,30 @@ pub use pairing::*;
 mod names;
 pub use names::*;
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Share {
     pub path: PathBuf,
     /// Put directory contents under its basename rather than at the collection root.
     pub include_directory_name: bool,
+    /// False keeps the data off Mainline from the start; see [`SetAnnounce`].
+    pub announce: bool,
 }
 
 /// Fetch into the daemon's public import directory and seed; retain names when updating.
-///
-/// New data keeps the collection's paths. Updates reuse the layout chosen when
-/// the data was imported; see [`ImportWithOptions`].
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Import {
     pub source: DownloadSource,
     /// Update existing data while retaining its ID and linked names; None creates data.
     pub id: Option<u64>,
-}
-
-/// [`Import`] with an explicit layout, remembered for later updates of the data.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImportWithOptions {
-    pub source: DownloadSource,
-    /// Update existing data while retaining its ID and linked names; None creates data.
-    pub id: Option<u64>,
     /// False drops the collection's single top-level directory, which yields a
-    /// new collection hash. Fails if the collection has no such directory.
-    pub include_directory_name: bool,
-    /// False keeps the data off Mainline, as [`SetAnnounce`] does. New data is
-    /// created with this setting, so it is never announced, not even briefly.
-    pub announce: bool,
+    /// new collection hash. None keeps the collection's paths for new data, and
+    /// the remembered layout for updates.
+    pub include_directory_name: Option<bool>,
+    /// False keeps the data off Mainline from the start. None announces new
+    /// data and keeps the setting of updated data.
+    pub announce: Option<bool>,
 }
 
 /// Turn Mainline announcement of one data item's content hash on or off.
@@ -84,18 +81,15 @@ pub struct ImportWithOptions {
 /// Off keeps seeding: direct tickets still work, but blake3.net links and
 /// provider discovery can no longer find this daemon for that content.
 /// The choice persists across updates and restarts.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetAnnounce {
     pub id: u64,
     pub announce: bool,
 }
 
-/// Stream [`AnnounceSnapshot`]s: one immediately, then one per change.
-///
-/// Separate from [`Watch`] so `Job` and `WatchEvent` stay compatible with older clients.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WatchAnnounce {}
-
+/// Per-data Mainline announcement settings, sent in [`WatchEvent::AnnounceUpdated`].
+#[schema(Nominal)]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnnounceSnapshot {
     /// False when the daemon runs with `--no-announce`; nothing is announced.
@@ -105,47 +99,59 @@ pub struct AnnounceSnapshot {
 }
 
 /// Report the default public destination on the daemon's filesystem.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetImportDirectory {}
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Refresh {
     pub id: u64,
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Download {
     pub source: DownloadSource,
     pub target: PathBuf,
+    /// False keeps the data off Mainline from the start; see [`SetAnnounce`].
+    pub announce: bool,
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Remove {
     pub id: u64,
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct List {}
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Watch {}
 
 /// Gracefully stop the daemon; restricted to authorized control clients.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Shutdown {}
 
 /// Complete a path using the daemon's filesystem, home and working directory.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletePath {
     pub path: PathBuf,
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PathKind {
     File,
     Directory,
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PathCandidate {
     /// Absolute daemon path; directories include the daemon's trailing separator.
@@ -153,6 +159,7 @@ pub struct PathCandidate {
     pub kind: PathKind,
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathCompletions {
     /// Safe common prefix, computed with the daemon's path syntax.
@@ -163,6 +170,7 @@ pub struct PathCompletions {
 }
 
 /// Counters for importing a known set of source files.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ImportProgress {
     pub bytes_done: u64,
@@ -172,6 +180,7 @@ pub struct ImportProgress {
 }
 
 /// Download counters include collection metadata. The total may not yet be known.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DownloadProgress {
     pub bytes_done: u64,
@@ -179,6 +188,7 @@ pub struct DownloadProgress {
 }
 
 /// Export counters cover payload files only.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExportProgress {
     pub bytes_done: u64,
@@ -187,13 +197,65 @@ pub struct ExportProgress {
     pub files_total: u64,
 }
 
+/// A data item of the daemon, with its current state.
+///
+/// On the wire, a job is a [`JobWire`], so that its layout can change without
+/// changing the schema hash of every request that returns jobs.
+#[schema(Atom(name = "iroh_share::Job"))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(from = "JobWire", into = "JobWire")]
 pub struct Job {
     pub id: u64,
     pub kind: JobKind,
     pub state: JobState,
 }
 
+/// The first layout of [`Job`], which is also how the v5 protocol encodes jobs.
+///
+/// It includes [`JobKind`] and [`JobState`] as they are now. Changing those
+/// changes this layout, so it needs a new [`JobWire`] variant instead.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobV0 {
+    pub id: u64,
+    pub kind: JobKind,
+    pub state: JobState,
+}
+
+/// The layouts of [`Job`] on the wire, one variant per version.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum JobWire {
+    V0(JobV0),
+}
+
+impl From<Job> for JobV0 {
+    fn from(job: Job) -> Self {
+        let Job { id, kind, state } = job;
+        Self { id, kind, state }
+    }
+}
+
+impl From<JobV0> for Job {
+    fn from(job: JobV0) -> Self {
+        let JobV0 { id, kind, state } = job;
+        Self { id, kind, state }
+    }
+}
+
+impl From<Job> for JobWire {
+    fn from(job: Job) -> Self {
+        Self::V0(job.into())
+    }
+}
+
+impl From<JobWire> for Job {
+    fn from(wire: JobWire) -> Self {
+        match wire {
+            JobWire::V0(job) => job.into(),
+        }
+    }
+}
+
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum JobKind {
     Share {
@@ -206,12 +268,14 @@ pub enum JobKind {
     },
 }
 
+#[schema(Nominal)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobError {
     pub message: String,
 }
 
 /// Each state carries exactly the information available in that state.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum JobState {
     Queued,
@@ -223,11 +287,13 @@ pub enum JobState {
         progress: DownloadProgress,
     },
     Exporting {
+        #[schema(atom = "blake3::Hash")]
         root_hash: Hash,
         progress: ExportProgress,
     },
     /// The root hash is available through `ticket.hash()`.
     Seeding {
+        #[schema(atom = "iroh_blobs::BlobTicket")]
         ticket: BlobTicket,
         /// Active requests addressed to this collection root (not distinct peers).
         active_uploads: u32,
@@ -237,7 +303,13 @@ pub enum JobState {
     },
 }
 
+/// An event of a [`Watch`] stream.
+///
+/// On the wire, an event is a [`WatchEventWire`], so that new events or
+/// changed layouts do not change the schema hash of [`Watch`].
+#[schema(Atom(name = "iroh_share::WatchEvent"))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(from = "WatchEventWire", into = "WatchEventWire")]
 pub enum WatchEvent {
     /// A complete job snapshot, both during initial enumeration and live updates.
     JobUpdated(Box<Job>),
@@ -250,16 +322,67 @@ pub enum WatchEvent {
     JobRemoved {
         id: u64,
     },
-    /// Sent once per watcher for older clients; see [`GetGateway`].
-    GatewayUpdated(GatewaySnapshot),
+    /// Announcement settings: sent before [`Self::SnapshotComplete`], then on every change.
+    AnnounceUpdated(AnnounceSnapshot),
+}
+
+/// The first layout of [`WatchEvent`].
+///
+/// It includes [`Job`], [`Name`] and [`AnnounceSnapshot`] as they are now.
+/// Changing those changes this layout, so it needs a new [`WatchEventWire`]
+/// variant instead. [`Job`] has its own versions, so it can change freely.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WatchEventV0 {
+    JobUpdated(Box<Job>),
+    SnapshotComplete,
+    NameUpdated(Box<Name>),
+    NameRemoved { label: String },
+    JobRemoved { id: u64 },
+    AnnounceUpdated(AnnounceSnapshot),
+}
+
+/// The layouts of [`WatchEvent`] on the wire, one variant per version.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WatchEventWire {
+    V0(WatchEventV0),
+}
+
+impl From<WatchEvent> for WatchEventWire {
+    fn from(event: WatchEvent) -> Self {
+        Self::V0(match event {
+            WatchEvent::JobUpdated(job) => WatchEventV0::JobUpdated(job),
+            WatchEvent::SnapshotComplete => WatchEventV0::SnapshotComplete,
+            WatchEvent::NameUpdated(name) => WatchEventV0::NameUpdated(name),
+            WatchEvent::NameRemoved { label } => WatchEventV0::NameRemoved { label },
+            WatchEvent::JobRemoved { id } => WatchEventV0::JobRemoved { id },
+            WatchEvent::AnnounceUpdated(snapshot) => WatchEventV0::AnnounceUpdated(snapshot),
+        })
+    }
+}
+
+impl From<WatchEventWire> for WatchEvent {
+    fn from(wire: WatchEventWire) -> Self {
+        match wire {
+            WatchEventWire::V0(event) => match event {
+                WatchEventV0::JobUpdated(job) => Self::JobUpdated(job),
+                WatchEventV0::SnapshotComplete => Self::SnapshotComplete,
+                WatchEventV0::NameUpdated(name) => Self::NameUpdated(name),
+                WatchEventV0::NameRemoved { label } => Self::NameRemoved { label },
+                WatchEventV0::JobRemoved { id } => Self::JobRemoved { id },
+                WatchEventV0::AnnounceUpdated(snapshot) => Self::AnnounceUpdated(snapshot),
+            },
+        }
+    }
 }
 
 /// Export all naming keys and current records as a ZIP archive.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportNames {}
 
 /// Export one name's key and current record as a ZIP archive, in the same
 /// layout as [`ExportNames`].
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportName {
     pub label: String,
@@ -269,6 +392,7 @@ pub struct ExportName {
 ///
 /// The whole archive is validated before any name is added. Keys the daemon
 /// already manages are skipped, never overwritten.
+#[schema(Nominal)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportNames {
     pub archive: Vec<u8>,
@@ -277,60 +401,126 @@ pub struct ImportNames {
 pub type RpcResult<T> = Result<T, String>;
 
 #[rpc_requests(message = ControlMessage)]
-#[derive(Debug, Serialize, Deserialize)]
+#[serialize_service(ControlProtocol)]
+#[derive(Debug)]
 pub enum ControlProtocol {
+    /// Lists the endpoint IDs that may use the control protocol.
     #[rpc(tx=oneshot::Sender<RpcResult<Vec<EndpointId>>>)]
     ListControl(ListControl),
+    /// Allows an endpoint ID to use the control protocol.
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     AllowControl(AllowControl),
+    /// Revokes the control access of an endpoint ID, and closes its connections.
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     RevokeControl(RevokeControl),
+    /// Imports a local file or directory into the store and seeds it, as a new data item.
     #[rpc(tx=oneshot::Sender<RpcResult<Job>>)]
     Share(Share),
+    /// Creates a mutable name that points to a data item or a fixed hash, and publishes it.
     #[rpc(tx=oneshot::Sender<RpcResult<Name>>)]
     CreateName(CreateName),
+    /// Points an existing name at a different target, and publishes the new record.
     #[rpc(tx=oneshot::Sender<RpcResult<Name>>)]
     UpdateName(UpdateName),
+    /// Stops publishing a name and removes it from the daemon.
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     RemoveName(RemoveName),
+    /// Lists all names that the daemon manages.
     #[rpc(tx=oneshot::Sender<RpcResult<Vec<Name>>>)]
     ListNames(ListNames),
+    /// Downloads a collection into a local directory chosen by the client, and seeds it.
     #[rpc(tx=oneshot::Sender<RpcResult<Job>>)]
     Download(Download),
+    /// Lists all data items with their current state.
     #[rpc(tx=oneshot::Sender<RpcResult<Vec<Job>>>)]
     List(List),
+    /// Stops seeding a data item and removes it from the daemon. Files on disk are kept.
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     Remove(Remove),
+    /// Streams the current data items, names and announcement settings, then each change as it happens.
     #[rpc(tx=mpsc::Sender<RpcResult<WatchEvent>>)]
     Watch(Watch),
+    /// Completes a path on the daemon's filesystem, for path inputs in remote clients.
     #[rpc(tx=oneshot::Sender<RpcResult<PathCompletions>>)]
     CompletePath(CompletePath),
+    /// Creates a one-time ticket that grants a new client control access.
     #[rpc(tx=oneshot::Sender<RpcResult<PairingTicket>>)]
     CreatePairingTicket(CreatePairingTicket),
-    /// Kept for wire compatibility; the daemon no longer runs a gateway.
-    #[rpc(tx=oneshot::Sender<RpcResult<GatewaySnapshot>>)]
-    GetGateway(GetGateway),
-    #[rpc(tx=oneshot::Sender<RpcResult<GatewaySnapshot>>)]
-    SetGateway(SetGateway),
+    /// Stops the daemon gracefully.
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     Shutdown(Shutdown),
-    /// Rescan a local directory followed by at least one managed name.
+    /// Rescans a local directory followed by at least one managed name.
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     Refresh(Refresh),
+    /// Downloads a ticket or link into the daemon's import directory and seeds it, or updates an earlier import with `id`.
     #[rpc(tx=oneshot::Sender<RpcResult<Job>>)]
     Import(Import),
+    /// Returns the directory on the daemon's filesystem that ticket imports go to.
     #[rpc(tx=oneshot::Sender<RpcResult<PathBuf>>)]
     GetImportDirectory(GetImportDirectory),
+    /// Exports the keys and current records of all names as a ZIP archive.
     #[rpc(tx=oneshot::Sender<RpcResult<Vec<u8>>>)]
     ExportNames(ExportNames),
+    /// Exports the key and current record of one name as a ZIP archive.
     #[rpc(tx=oneshot::Sender<RpcResult<Vec<u8>>>)]
     ExportName(ExportName),
+    /// Restores names from an archive made by `ExportNames` or `ExportName`, skipping keys the daemon already has.
     #[rpc(tx=oneshot::Sender<RpcResult<Vec<ImportedName>>>)]
     ImportNames(ImportNames),
-    #[rpc(tx=oneshot::Sender<RpcResult<Job>>)]
-    ImportWithOptions(ImportWithOptions),
+    /// Turns Mainline announcement of one data item on or off. Direct tickets keep working either way.
     #[rpc(tx=oneshot::Sender<RpcResult<()>>)]
     SetAnnounce(SetAnnounce),
-    #[rpc(tx=mpsc::Sender<RpcResult<AnnounceSnapshot>>)]
-    WatchAnnounce(WatchAnnounce),
+}
+
+#[cfg(test)]
+mod wire_tests {
+    use super::*;
+    use n0_schema::HasSchema;
+
+    fn job() -> Job {
+        Job {
+            id: 7,
+            kind: JobKind::Share {
+                path: "/data".into(),
+                include_directory_name: true,
+            },
+            state: JobState::Queued,
+        }
+    }
+
+    /// A job is its version tag followed by the old layout, which v5 still sends.
+    #[test]
+    fn job_is_versioned_and_v0_keeps_the_old_layout() {
+        let job = job();
+        let current = postcard::to_allocvec(&job).unwrap();
+        let v0 = postcard::to_allocvec(&JobV0::from(job.clone())).unwrap();
+        assert_eq!(current[0], 0, "version tag of V0");
+        assert_eq!(&current[1..], &v0[..]);
+        let decoded: Job = postcard::from_bytes(&current).unwrap();
+        assert_eq!(decoded.id, 7);
+        let old: JobV0 = postcard::from_bytes(&v0).unwrap();
+        assert_eq!(old.id, 7);
+    }
+
+    #[test]
+    fn watch_event_is_versioned() {
+        let event = WatchEvent::JobUpdated(Box::new(job()));
+        let bytes = postcard::to_allocvec(&event).unwrap();
+        assert_eq!(bytes[0], 0, "version tag of V0");
+        let decoded: WatchEvent = postcard::from_bytes(&bytes).unwrap();
+        assert!(matches!(decoded, WatchEvent::JobUpdated(job) if job.id == 7));
+    }
+
+    /// The layouts are behind atoms, so they do not show up in request hashes.
+    #[test]
+    fn job_and_watch_event_are_atoms() {
+        assert_eq!(
+            Job::schema(),
+            n0_schema::Schema::Atom("iroh_share::Job".into())
+        );
+        assert_eq!(
+            WatchEvent::schema(),
+            n0_schema::Schema::Atom("iroh_share::WatchEvent".into())
+        );
+    }
 }

@@ -2749,6 +2749,7 @@ dependencies = [
  "irpc",
  "n0-future",
  "n0-mainline",
+ "n0-schema",
  "pkarr",
  "plist",
  "rand 0.10.3",
@@ -2792,6 +2793,7 @@ dependencies = [
  "iroh-blobs",
  "iroh-tickets",
  "irpc",
+ "n0-schema",
  "postcard",
  "rand 0.10.3",
  "rustix 1.1.4",
@@ -3364,6 +3366,37 @@ dependencies = [
  "sha1_smol",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "n0-schema"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1928ce242d8172d5e9e9014755d30444797333ea452d0acac60a41c6f5b43dd2"
+dependencies = [
+ "blake3",
+ "bytes",
+ "iroh-base",
+ "irpc",
+ "n0-schema-derive",
+ "postcard",
+ "serde",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "n0-schema-derive"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13fa4b552a6189058c32b2c0953e5f667b63559b5d6d0f49d22c83ead52cfd72"
+dependencies = [
+ "blake3",
+ "postcard",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn 3.0.6",
 ]
 
 [[package]]

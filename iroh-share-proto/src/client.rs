@@ -26,22 +26,25 @@ pub fn default_state_dir() -> Result<PathBuf> {
 #[derive(Clone)]
 pub struct ControlClient {
     client: Client<ControlProtocol>,
+    /// Lists the requests of the daemon, on the same connection as `client`.
+    meta: Client<n0_schema::meta::MetaProtocol>,
     endpoint: Endpoint,
-    addr: EndpointAddr,
     remote: bool,
 }
 
 impl ControlClient {
     /// Use a caller-owned iroh endpoint, including an embedded UI's identity.
     pub fn from_endpoint(endpoint: Endpoint, addr: EndpointAddr) -> Self {
-        Self {
-            client: irpc::Client::<ControlProtocol>::iroh(
-                endpoint.clone(),
-                addr.clone(),
-                crate::CONTROL_ALPN,
-            ),
-            endpoint,
+        // Control and meta requests share one connection, which reconnects when needed.
+        let connection = irpc::iroh::IrohLazyRemoteConnection::new(
+            endpoint.clone(),
             addr,
+            crate::CONTROL_ALPN.to_vec(),
+        );
+        Self {
+            client: Client::boxed(connection.clone()),
+            meta: Client::boxed(connection),
+            endpoint,
             remote: true,
         }
     }
@@ -150,13 +153,15 @@ impl ControlClient {
     }
 
     pub async fn share(&self, path: PathBuf) -> Result<Job> {
-        self.share_with_options(path, false).await
+        self.share_with_options(path, false, true).await
     }
 
+    /// Shares `path`; with `announce` false, the data is kept off Mainline from the start.
     pub async fn share_with_options(
         &self,
         path: PathBuf,
         include_directory_name: bool,
+        announce: bool,
     ) -> Result<Job> {
         let path = if self.remote {
             path
@@ -168,6 +173,7 @@ impl ControlClient {
             self.client.rpc(Share {
                 path,
                 include_directory_name,
+                announce,
             }),
         )
         .await
@@ -178,7 +184,12 @@ impl ControlClient {
     pub async fn import(&self, source: crate::DownloadSource, id: Option<u64>) -> Result<Job> {
         tokio::time::timeout(
             Duration::from_secs(10),
-            self.client.rpc(crate::Import { source, id }),
+            self.client.rpc(crate::Import {
+                source,
+                id,
+                include_directory_name: None,
+                announce: None,
+            }),
         )
         .await
         .context("import request timed out; check data before retrying")??
@@ -197,11 +208,11 @@ impl ControlClient {
     ) -> Result<Job> {
         tokio::time::timeout(
             Duration::from_secs(10),
-            self.client.rpc(crate::ImportWithOptions {
+            self.client.rpc(crate::Import {
                 source,
                 id,
-                include_directory_name,
-                announce,
+                include_directory_name: Some(include_directory_name),
+                announce: Some(announce),
             }),
         )
         .await
@@ -244,11 +255,38 @@ impl ControlClient {
             self.client.rpc(Download {
                 source: source.into(),
                 target,
+                announce: true,
             }),
         )
         .await
         .context("download request timed out; check the job list before retrying")??
         .map_err(anyhow::Error::msg)
+    }
+
+    /// Lists the requests that the daemon supports, with their schema and docs.
+    ///
+    /// Daemons up to 0.1.14 do not support this.
+    pub async fn list_requests(&self) -> Result<Vec<n0_schema::meta::CaseInfo>> {
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            self.meta.rpc(n0_schema::meta::ListCases {}),
+        )
+        .await
+        .context("request list timed out")?
+        .context("daemon does not list its requests")
+    }
+
+    /// Returns whether the daemon supports request `R`.
+    pub async fn supports<R>(&self) -> Result<bool>
+    where
+        R: n0_schema::ChannelsSchema<ControlProtocol>,
+    {
+        let hash = n0_schema::request_hash::<ControlProtocol, R>();
+        Ok(self
+            .list_requests()
+            .await?
+            .iter()
+            .any(|case| case.hash == hash))
     }
 
     pub async fn list(&self) -> Result<Vec<Job>> {
@@ -275,31 +313,7 @@ impl ControlClient {
         .map_err(Into::into)
     }
 
-    /// Stream per-data Mainline announcement state.
-    ///
-    /// Uses its own connection: a daemon from 0.1.10 or earlier closes the
-    /// connection on this unknown request, which must not take down [`Self::watch`].
-    /// From 0.1.13 on, a daemon rejects only the unknown request, see
-    /// [`is_unsupported`]; requests added later can share the connection.
-    /// Fails, or the stream ends, if the daemon does not support it.
-    pub async fn watch_announce(
-        &self,
-    ) -> Result<mpsc::Receiver<RpcResult<crate::AnnounceSnapshot>>> {
-        let client: Client<ControlProtocol> = Client::iroh(
-            self.endpoint.clone(),
-            self.addr.clone(),
-            crate::CONTROL_ALPN,
-        );
-        tokio::time::timeout(
-            Duration::from_secs(10),
-            client.server_streaming(crate::WatchAnnounce {}, 8),
-        )
-        .await
-        .context("announce watch request timed out")?
-        .map_err(Into::into)
-    }
-
-    /// Only send this to a daemon whose [`Self::watch_announce`] works.
+    /// Turns Mainline announcement of one data item on or off.
     pub async fn set_announce(&self, id: u64, announce: bool) -> Result<()> {
         tokio::time::timeout(
             Duration::from_secs(10),

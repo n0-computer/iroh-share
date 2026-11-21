@@ -17,6 +17,7 @@ z32.workspace = true
 serde.workspace = true
 iroh-blobs.workspace = true
 irpc.workspace = true
+n0-schema = { version = "0.2", features = ["url", "iroh-base", "meta"] }
 iroh.workspace = true
 
 [features]

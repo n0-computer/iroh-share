@@ -177,24 +177,43 @@ pub fn pairing_address(endpoint: &iroh::Endpoint) -> iroh::EndpointAddr {
     addr
 }
 
+/// Serves a control protocol to allowlisted endpoints only.
 #[derive(Debug)]
-pub struct Control {
+pub struct Control<S = ControlProtocol> {
     access: Access,
-    protocol: irpc::iroh::IrohProtocol<ControlProtocol>,
+    protocol: irpc::iroh::IrohProtocol<S>,
 }
-impl Control {
-    pub fn new(access: Access, sender: irpc::LocalSender<ControlProtocol>) -> Self {
+impl<S: irpc::Service> Control<S> {
+    pub fn new(access: Access, handler: impl Into<irpc::rpc::Handler<S>>) -> Self {
         Self {
             access,
             // A request this daemon does not know fails on its own, so a newer
             // client can try it without losing the connection and its watches.
-            protocol: irpc::iroh::IrohProtocol::new(
-                irpc::rpc::Handler::from_sender(sender).skip_bad_requests(true),
-            ),
+            protocol: irpc::iroh::IrohProtocol::new(handler.into().skip_bad_requests(true)),
         }
     }
 }
-impl ProtocolHandler for Control {
+
+/// What the daemon serves on [`iroh_share_proto::CONTROL_ALPN`]: the control
+/// protocol, and the meta protocol that lists its requests.
+#[n0_schema::combine_services]
+#[derive(Debug)]
+pub enum ControlServer {
+    Meta(n0_schema::meta::MetaProtocol),
+    Control(ControlProtocol),
+}
+
+impl ControlServer {
+    /// Returns the handler for the control protocol, which sends its requests to `actor`.
+    pub fn serve(actor: irpc::LocalSender<ControlProtocol>) -> irpc::rpc::Handler<Self> {
+        Self::handler(n0_schema::meta::serve::<Self>(), actor)
+    }
+}
+impl<S> ProtocolHandler for Control<S>
+where
+    S: std::fmt::Debug + Send + Sync + 'static,
+    irpc::iroh::IrohProtocol<S>: ProtocolHandler,
+{
     async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
         // This runs only after the authenticated handshake, never in 0-RTT.
         let peer = connection.remote_id();
@@ -307,7 +326,10 @@ mod tests {
             let router = Router::builder(endpoint.clone())
                 .accept(
                     CONTROL_ALPN,
-                    Control::new(access.clone(), irpc::LocalSender::from(tx)),
+                    Control::<iroh_share_proto::ControlProtocol>::new(
+                        access.clone(),
+                        irpc::LocalSender::from(tx),
+                    ),
                 )
                 .accept(
                     iroh_share_proto::PAIRING_ALPN,
@@ -388,7 +410,10 @@ mod tests {
                 .accept(iroh_blobs::ALPN, BlobsProtocol::new(&store, None))
                 .accept(
                     CONTROL_ALPN,
-                    Control::new(access.clone(), irpc::LocalSender::from(tx)),
+                    Control::<iroh_share_proto::ControlProtocol>::new(
+                        access.clone(),
+                        irpc::LocalSender::from(tx),
+                    ),
                 )
                 .spawn();
             let service = tokio::spawn(async move {
@@ -486,7 +511,10 @@ mod tests {
             let router = Router::builder(endpoint.clone())
                 .accept(
                     CONTROL_ALPN,
-                    Control::new(access.clone(), irpc::LocalSender::from(tx)),
+                    Control::<iroh_share_proto::ControlProtocol>::new(
+                        access.clone(),
+                        irpc::LocalSender::from(tx),
+                    ),
                 )
                 .spawn();
             let service = tokio::spawn(async move {
